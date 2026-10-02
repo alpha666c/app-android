@@ -1,0 +1,7 @@
+# Secrets — never commit .env
+.env
+*.db
+__pycache__/
+.pytest_cache/
+.venv/
+evidence/smoke_*.json

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>PolyScope Trader</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1.5rem; background: #0f1419; color: #e7ecf1; }
+    .banner { padding: 1rem; border-radius: 8px; margin-bottom: 1rem; font-weight: 600; }
+    .mode-paper { background: #1e3a5f; }
+    .mode-research { background: #3d3d1e; }
+    .mode-live { background: #5f1e1e; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 1.5rem; }
+    th, td { border: 1px solid #333; padding: 0.4rem 0.6rem; text-align: left; }
+    th { background: #1a2332; }
+    .muted { color: #9aa4b2; font-size: 0.9rem; }
+    button { padding: 0.5rem 1rem; margin-right: 0.5rem; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="banner mode-{{ mode }}">
+    Mode: {{ mode | upper }}
+    {% if mode == 'live' %}
+      — Env LIVE_ARMED: {{ live_armed_env }}
+      — Session armed: {{ live_session_armed }}
+    {% endif %}
+    {% if kill_switch %} — KILL SWITCH ACTIVE{% endif %}
+  </div>
+
+  <p class="muted">
+    Simulated/paper balances are labeled {{ collateral_label }} and are not withdrawable live funds.
+    Wallet addresses are not verified human identities. Signals are hypotheses, not edge guarantees.
+  </p>
+
+  <h2>System health</h2>
+  <ul>
+    <li>Geoblock blocked: {{ geoblock_blocked }} ({{ geoblock_country or 'unknown' }})</li>
+    <li>Last reconciliation: {{ last_reconciliation or 'never' }}</li>
+    <li>Last public data: {{ last_public_data or 'never' }}</li>
+  </ul>
+
+  <h2>Balances (paper ledger)</h2>
+  <table>
+    <tr><th>Account</th><th>Balance</th></tr>
+    {% for name, bal in accounts.items() %}
+    <tr><td>{{ name }}</td><td>{{ bal }}</td></tr>
+    {% endfor %}
+  </table>
+
+  <h2>Risk limits (paper defaults unless LIVE env set)</h2>
+  <ul>
+    <li>Max order cost: {{ risk.max_order_cost }}</li>
+    <li>Max event exposure: {{ risk.max_event_exposure }}</li>
+    <li>Max total exposure: {{ risk.max_total_exposure }}</li>
+    <li>Daily loss circuit breaker: {{ risk.daily_loss_circuit_breaker }} (not a hard max loss)</li>
+  </ul>
+
+  <h2>Cohort (leaderboard-derived)</h2>
+  <table>
+    <tr><th>Rank</th><th>Wallet</th><th>Included</th><th>Reason</th></tr>
+    {% for w in cohort %}
+    <tr>
+      <td>{{ w.rank }}</td>
+      <td>{{ w.wallet[:10] }}…</td>
+      <td>{{ w.included }}</td>
+      <td>{{ w.exclusion_reason or '—' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <h2>Signals</h2>
+  <table>
+    <tr><th>ID</th><th>Wallet</th><th>Side</th><th>Status</th><th>Reject</th><th>Observed</th></tr>
+    {% for s in signals %}
+    <tr>
+      <td>{{ s.id }}</td>
+      <td>{{ s.wallet[:10] }}…</td>
+      <td>{{ s.side }}</td>
+      <td>{{ s.status }}</td>
+      <td>{{ s.reject_reason or '—' }}</td>
+      <td>{{ s.observed_at }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6">No signals yet — successful idle state if no qualifying opportunities.</td></tr>
+    {% endfor %}
+  </table>
+
+  <h2>Positions</h2>
+  <table>
+    <tr><th>Outcome</th><th>Size</th><th>Avg entry</th><th>Unrealized</th></tr>
+    {% for p in positions %}
+    <tr>
+      <td>{{ p.outcome or p.token_id[:8] }}</td>
+      <td>{{ p.size }}</td>
+      <td>{{ p.avg_entry_price }}</td>
+      <td>{{ p.unrealized_pnl }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4">No open positions</td></tr>
+    {% endfor %}
+  </table>
+
+  <p>
+    <a href="/api/export/evidence.json">Export JSON</a> |
+    <a href="/api/export/evidence.csv">Export CSV</a>
+  </p>
+  <p class="muted">Use authenticated POST /api/kill-switch to halt new orders.</p>
+</body>
+</html>
