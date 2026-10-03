@@ -28,6 +28,13 @@ class PaperCallOutput:
     provider: str
 
 
+@dataclass
+class PaperDecisionOutput:
+    action: str
+    reason: str
+    provider: str
+
+
 class ResearchAIClient:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -93,34 +100,47 @@ class ResearchAIClient:
         return self.settings.ai_provider
 
     async def suggest_paper_call(self, market_facts: dict) -> PaperCallOutput:
-        """Research-only paper suggestion. Never places orders."""
+        """Legacy wrapper; prefer suggest_paper_decision."""
+        out = await self.suggest_paper_decision(market_facts)
+        return PaperCallOutput(call=out.action, reason=out.reason, provider=out.provider)
+
+    async def suggest_paper_decision(self, market_facts: dict) -> PaperDecisionOutput:
+        """Research-only structured decision. Never places orders or invents prices."""
         if not self.available():
-            return PaperCallOutput(
-                call="SKIP",
+            return PaperDecisionOutput(
+                action="WAIT",
                 reason=research_ai_skip_reason(self.settings),
                 provider="rules_fallback",
             )
         prompt = (
-            "You advise on prediction markets for PAPER research only. "
-            "Output ONLY JSON with keys: call, reason. "
-            "call must be one of: BUY_YES, BUY_NO, SKIP. "
+            "You advise on Polymarket prediction markets for PAPER research only. "
+            "Output ONLY JSON with keys: action, reason. "
+            "action must be one of: BUY, SELL, WAIT, REJECT. "
+            "BUY means favor YES, SELL means favor NO, WAIT means abstain, REJECT means veto the setup. "
             "reason is one or two short sentences, no hype. "
-            "Do not mention order sizes or live trading. Market facts:\n"
+            "Do NOT invent prices, probabilities, or outcomes. "
+            "Use only the facts provided. Market facts:\n"
             + json.dumps(market_facts, default=str)
         )
         if self.settings.ai_provider == "openai_compatible":
             parsed = await self._openai_json(prompt)
             if parsed:
-                call = str(parsed.get("call", "SKIP")).upper()
-                if call not in ("BUY_YES", "BUY_NO", "SKIP"):
-                    call = "SKIP"
-                return PaperCallOutput(
-                    call=call,
+                action = str(parsed.get("action", parsed.get("call", "WAIT"))).upper()
+                allowed = ("BUY", "SELL", "WAIT", "REJECT", "BUY_YES", "BUY_NO", "SKIP")
+                if action not in allowed:
+                    action = "WAIT"
+                return PaperDecisionOutput(
+                    action=action,
                     reason=str(parsed.get("reason", "No reason returned.")),
                     provider="openai_compatible",
                 )
-        return PaperCallOutput(
-            call="SKIP",
+            return PaperDecisionOutput(
+                action="WAIT",
+                reason="Model returned invalid output. Paper mode only.",
+                provider=self.provider_display_name(),
+            )
+        return PaperDecisionOutput(
+            action="WAIT",
             reason="Model provider unavailable. Paper mode only.",
             provider=self.provider_display_name(),
         )

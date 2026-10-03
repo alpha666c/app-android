@@ -34,6 +34,22 @@
     {% if latest %}
     <div class="call">{{ latest.call }} · {{ latest.market_title }}</div>
     <div class="reason">{{ latest.reason }}</div>
+    {% if evidence_items or evidence_ids %}
+    <div class="muted" style="margin-top:0.75rem">Evidence (computed in code)</div>
+    <ul class="markets">
+      {% for e in evidence_items %}
+      <li>{{ e.title or e.market_slug }} · YES buy {{ e.yes_buy_price or 'n/a' }} · {{ e.id }}</li>
+      {% endfor %}
+      {% if not evidence_items %}
+      {% for eid in evidence_ids %}
+      <li>{{ eid }}</li>
+      {% endfor %}
+      {% endif %}
+    </ul>
+    {% if vault_decision_path %}
+    <div class="muted">Vault note: {{ vault_decision_path }}</div>
+    {% endif %}
+    {% endif %}
     <div class="muted" style="margin-top:0.5rem">{{ latest.created_at }} UTC</div>
     <div class="muted">Outcome (fill later): <span class="outcome">{{ latest.outcome or 'pending' }}</span></div>
     {% else %}

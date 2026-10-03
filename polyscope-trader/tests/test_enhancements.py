@@ -80,6 +80,7 @@ def test_tier_observe_blocks_auto():
         report_dir="evidence/reports",
         viktor_view_token=None,
         viktor_public_slug=None,
+        vault_dir="vault",
     )
     assert tier_allows_auto_execute(settings, AutomationTier.OBSERVE) is False
 

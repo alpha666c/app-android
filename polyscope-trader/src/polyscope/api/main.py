@@ -134,6 +134,15 @@ async def build_viktor_page(
             markets = await fetch_open_markets(platform, limit=6)
         except Exception:
             markets = []
+    evidence_items: list[dict] = []
+    evidence_ids: list[str] = []
+    if latest and latest.evidence_json:
+        try:
+            payload = json.loads(latest.evidence_json)
+            evidence_ids = list(payload.get("evidence_ids") or [])
+            evidence_items = list(payload.get("items") or [])
+        except json.JSONDecodeError:
+            pass
     return templates.TemplateResponse(
         request,
         "viktor.html",
@@ -146,6 +155,9 @@ async def build_viktor_page(
             "history": history,
             "markets": markets,
             "refresh_path": refresh_path,
+            "evidence_items": evidence_items,
+            "evidence_ids": evidence_ids,
+            "vault_decision_path": latest.vault_decision_path if latest else None,
         },
     )
 

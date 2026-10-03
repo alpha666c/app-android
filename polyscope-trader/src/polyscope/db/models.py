@@ -274,4 +274,8 @@ class PaperModelCall(Base):
     provider: Mapped[str] = mapped_column(String(64))
     mode: Mapped[str] = mapped_column(String(16), default="paper")
     outcome: Mapped[str | None] = mapped_column(String(256))
+    hypothesis_id: Mapped[str | None] = mapped_column(String(64))
+    decision_id: Mapped[str | None] = mapped_column(String(64))
+    evidence_json: Mapped[str | None] = mapped_column(Text)
+    vault_decision_path: Mapped[str | None] = mapped_column(String(512))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -34,4 +34,13 @@ def run_migrations(engine: Engine) -> None:
             ):
                 if not _has_column(engine, "signals", col):
                     conn.execute(text(f"ALTER TABLE signals ADD COLUMN {col} {ddl}"))
+        if _has_column(engine, "paper_model_calls", "id"):
+            for col, ddl in (
+                ("hypothesis_id", "VARCHAR(64)"),
+                ("decision_id", "VARCHAR(64)"),
+                ("evidence_json", "TEXT"),
+                ("vault_decision_path", "VARCHAR(512)"),
+            ):
+                if not _has_column(engine, "paper_model_calls", col):
+                    conn.execute(text(f"ALTER TABLE paper_model_calls ADD COLUMN {col} {ddl}"))
         conn.commit()

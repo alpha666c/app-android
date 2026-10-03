@@ -19,7 +19,7 @@ def test_paper_model_call_has_outcome_field(monkeypatch, tmp_path):
             market_slug="test-market",
             market_title="Test?",
             condition_id="0xabc",
-            call="SKIP",
+            call="WAIT",
             reason="Paper research only.",
             provider="rules_fallback",
             mode="paper",

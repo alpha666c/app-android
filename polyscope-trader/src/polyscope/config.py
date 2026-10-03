@@ -86,6 +86,7 @@ class Settings:
     report_dir: str
     viktor_view_token: str | None
     viktor_public_slug: str | None
+    vault_dir: str
     collateral_label: str = "pUSD"
 
 
@@ -225,6 +226,7 @@ def load_settings() -> Settings:
         report_dir=os.environ.get("REPORT_DIR", "evidence/reports"),
         viktor_view_token=os.environ.get("VIKTOR_VIEW_TOKEN") or None,
         viktor_public_slug=os.environ.get("VIKTOR_PUBLIC_SLUG") or None,
+        vault_dir=os.environ.get("VAULT_DIR", "vault"),
     )
 
 

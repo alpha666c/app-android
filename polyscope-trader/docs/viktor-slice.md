@@ -4,7 +4,13 @@
 
 Local default (basic auth):
 
-`http://127.0.0.1:8080/viktor`
+Local operator URL (basic auth): `http://127.0.0.1:8080/viktor`
+
+Viktor mobile (no password): set `VIKTOR_PUBLIC_SLUG` and share only:
+
+`https://<your-host>/p/<VIKTOR_PUBLIC_SLUG>`
+
+Run locally plus a TLS tunnel (for example `cloudflared tunnel --url http://127.0.0.1:8080`) or deploy `scripts/run-viktor-public.sh` behind your HTTPS load balancer.
 
 Optional query token when `VIKTOR_VIEW_TOKEN` is set:
 
