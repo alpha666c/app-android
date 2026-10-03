@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from polyscope.config import Settings
+from polyscope.config import Settings, research_ai_skip_reason
 
 logger = logging.getLogger(__name__)
 
@@ -97,10 +97,7 @@ class ResearchAIClient:
         if not self.available():
             return PaperCallOutput(
                 call="SKIP",
-                reason=(
-                    "Paper only. No model key configured. Set AI_PROVIDER and "
-                    "AI_GATEWAY_API_KEY in the server environment to enable model calls."
-                ),
+                reason=research_ai_skip_reason(self.settings),
                 provider="rules_fallback",
             )
         prompt = (

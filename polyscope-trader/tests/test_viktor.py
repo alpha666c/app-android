@@ -78,3 +78,41 @@ def test_viktor_screen_requires_paper(monkeypatch, tmp_path):
 def test_viktor_path_has_no_live_gateway():
     gw = DisabledLiveGateway()
     assert gw.__class__.__name__ == "DisabledLiveGateway"
+
+
+def test_viktor_public_slug_no_password(monkeypatch, tmp_path):
+    from polyscope.api import main as api_main
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("TRADING_MODE", "paper")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "secret")
+    monkeypatch.setenv("POLYSCOPE_DB_PATH", str(tmp_path / "pub.db"))
+    monkeypatch.setenv("VIKTOR_PUBLIC_SLUG", "viktor-test-slug-93e7")
+    api_main.settings = None
+    api_main.SessionLocal = None
+    app = api_main.create_app()
+    client = TestClient(app)
+    resp = client.get("/p/viktor-test-slug-93e7")
+    assert resp.status_code == 200
+    assert "PAPER ONLY" in resp.text
+    assert "/p/viktor-test-slug-93e7/refresh" in resp.text
+    bad = client.get("/p/wrong-slug")
+    assert bad.status_code == 404
+    refresh = client.post("/p/viktor-test-slug-93e7/refresh")
+    assert refresh.status_code == 200
+    assert refresh.json()["paper"] is True
+
+
+def test_research_skip_lists_missing_env(monkeypatch):
+    from polyscope.config import load_settings, research_ai_skip_reason
+
+    monkeypatch.delenv("AI_GATEWAY_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("AI_PROVIDER", "none")
+    monkeypatch.setenv("TRADING_MODE", "paper")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "secret")
+    cfg = load_settings()
+    reason = research_ai_skip_reason(cfg)
+    assert "AI_GATEWAY_API_KEY" in reason
+    assert "OPENAI_API_KEY" in reason
+    assert "AI_PROVIDER" in reason

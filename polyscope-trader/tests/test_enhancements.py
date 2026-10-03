@@ -79,6 +79,7 @@ def test_tier_observe_blocks_auto():
         micro_max_order_cost=None,
         report_dir="evidence/reports",
         viktor_view_token=None,
+        viktor_public_slug=None,
     )
     assert tier_allows_auto_execute(settings, AutomationTier.OBSERVE) is False
 

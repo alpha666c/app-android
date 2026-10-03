@@ -85,6 +85,7 @@ class Settings:
     micro_max_order_cost: Decimal | None
     report_dir: str
     viktor_view_token: str | None
+    viktor_public_slug: str | None
     collateral_label: str = "pUSD"
 
 
@@ -215,15 +216,50 @@ def load_settings() -> Settings:
         ),
         use_stream_ingest=os.environ.get("USE_STREAM_INGEST", "false").lower()
         in ("1", "true", "yes"),
-        ai_provider=os.environ.get("AI_PROVIDER", "none"),
-        ai_gateway_api_key=os.environ.get("AI_GATEWAY_API_KEY") or None,
+        ai_provider=_resolve_ai_provider(),
+        ai_gateway_api_key=_resolve_ai_gateway_key(),
         ai_model=os.environ.get("AI_MODEL", "gpt-4o-mini"),
         live_scaled_unlocked=os.environ.get("LIVE_SCALED_UNLOCKED", "false").lower()
         in ("1", "true", "yes"),
         micro_max_order_cost=micro_max,
         report_dir=os.environ.get("REPORT_DIR", "evidence/reports"),
         viktor_view_token=os.environ.get("VIKTOR_VIEW_TOKEN") or None,
+        viktor_public_slug=os.environ.get("VIKTOR_PUBLIC_SLUG") or None,
     )
+
+
+def _resolve_ai_gateway_key() -> str | None:
+    return os.environ.get("AI_GATEWAY_API_KEY") or os.environ.get("OPENAI_API_KEY") or None
+
+
+def _resolve_ai_provider() -> str:
+    raw = (os.environ.get("AI_PROVIDER") or "none").strip().lower()
+    if raw in ("", "none") and _resolve_ai_gateway_key():
+        return "openai_compatible"
+    return raw or "none"
+
+
+def research_ai_missing_env_vars(settings: Settings) -> list[str]:
+    """Env vars still required for a real research model call (server-side only)."""
+    if settings.ai_provider != "none" and settings.ai_gateway_api_key:
+        return []
+    missing: list[str] = []
+    if not os.environ.get("AI_GATEWAY_API_KEY"):
+        missing.append("AI_GATEWAY_API_KEY")
+    if not os.environ.get("OPENAI_API_KEY"):
+        missing.append("OPENAI_API_KEY")
+    provider_raw = (os.environ.get("AI_PROVIDER") or "").strip().lower()
+    if provider_raw in ("", "none") and not settings.ai_gateway_api_key:
+        missing.append("AI_PROVIDER")
+    return missing
+
+
+def research_ai_skip_reason(settings: Settings) -> str:
+    missing = research_ai_missing_env_vars(settings)
+    if not missing:
+        return "Paper only. Research model skipped."
+    names = ", ".join(missing)
+    return f"Paper only. Research model skipped. Missing server env: {names}."
 
 
 def assert_paper_only_for_research(settings: Settings) -> None:

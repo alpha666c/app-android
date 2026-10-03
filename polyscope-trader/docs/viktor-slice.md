@@ -16,6 +16,10 @@ Research uses `AI_PROVIDER` (default `openai_compatible`) with `AI_GATEWAY_API_K
 
 If no key is set, provider label is `rules_fallback` (SKIP with setup instructions).
 
+## Screenshot
+
+Captured at `/opt/cursor/artifacts/screenshots/viktor-paper-screen.png` (mobile viewport).
+
 ## Paper proof
 
 - UI badges: **PAPER ONLY** and **LIVE LOCKED**

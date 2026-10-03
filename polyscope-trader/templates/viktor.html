@@ -76,12 +76,12 @@
       btn.disabled = true;
       status.textContent = 'Asking research model (paper only)...';
       try {
-        const r = await fetch('/viktor/refresh', { method: 'POST', credentials: 'same-origin' });
+        const r = await fetch('{{ refresh_path }}', { method: 'POST', credentials: 'same-origin' });
         if (!r.ok) throw new Error(await r.text());
         status.textContent = 'Saved. Reloading...';
         location.reload();
       } catch (e) {
-        status.textContent = 'Refresh failed. Check login.';
+        status.textContent = 'Refresh failed. Try again in a moment.';
         btn.disabled = false;
       }
     });

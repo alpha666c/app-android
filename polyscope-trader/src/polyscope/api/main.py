@@ -109,6 +109,64 @@ def verify_viktor_access(
     return True
 
 
+def assert_viktor_public_slug(slug: str, cfg: Settings) -> None:
+    if not cfg.viktor_public_slug or not secrets.compare_digest(slug, cfg.viktor_public_slug):
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+async def build_viktor_page(
+    request: Request,
+    db: Session,
+    cfg: Settings,
+    refresh_path: str,
+) -> HTMLResponse:
+    try:
+        assert_paper_only_for_research(cfg)
+    except ValueError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    latest = db.scalar(select(PaperModelCall).order_by(PaperModelCall.id.desc()).limit(1))
+    history = db.scalars(
+        select(PaperModelCall).order_by(PaperModelCall.id.desc()).limit(30)
+    ).all()
+    markets: list[dict] = []
+    async with PlatformClient() as platform:
+        try:
+            markets = await fetch_open_markets(platform, limit=6)
+        except Exception:
+            markets = []
+    return templates.TemplateResponse(
+        request,
+        "viktor.html",
+        {
+            "paper_only": True,
+            "live_locked": True,
+            "trading_mode": cfg.trading_mode.value,
+            "provider_label": latest.provider if latest else "none",
+            "latest": latest,
+            "history": history,
+            "markets": markets,
+            "refresh_path": refresh_path,
+        },
+    )
+
+
+async def run_viktor_refresh(db: Session, cfg: Settings) -> dict:
+    if cfg.trading_mode != TradingMode.PAPER:
+        raise HTTPException(403, "Live trading is locked. Use TRADING_MODE=paper.")
+    async with PlatformClient() as platform:
+        row = await generate_paper_model_call(db, cfg, platform)
+    db.commit()
+    return {
+        "paper": True,
+        "id": row.id,
+        "market": row.market_slug,
+        "call": row.call,
+        "reason": row.reason,
+        "provider": row.provider,
+        "outcome": row.outcome,
+    }
+
+
 def create_app() -> FastAPI:
     global settings, SessionLocal
     configure_logging()
@@ -126,35 +184,7 @@ def create_app() -> FastAPI:
         cfg: Annotated[Settings, Depends(get_settings)],
         _: Annotated[bool, Depends(verify_viktor_access)],
     ) -> HTMLResponse:
-        try:
-            assert_paper_only_for_research(cfg)
-        except ValueError as exc:
-            raise HTTPException(503, str(exc)) from exc
-        latest = db.scalar(
-            select(PaperModelCall).order_by(PaperModelCall.id.desc()).limit(1)
-        )
-        history = db.scalars(
-            select(PaperModelCall).order_by(PaperModelCall.id.desc()).limit(30)
-        ).all()
-        markets: list[dict] = []
-        async with PlatformClient() as platform:
-            try:
-                markets = await fetch_open_markets(platform, limit=6)
-            except Exception:
-                markets = []
-        return templates.TemplateResponse(
-            request,
-            "viktor.html",
-            {
-                "paper_only": True,
-                "live_locked": True,
-                "trading_mode": cfg.trading_mode.value,
-                "provider_label": latest.provider if latest else "none",
-                "latest": latest,
-                "history": history,
-                "markets": markets,
-            },
-        )
+        return await build_viktor_page(request, db, cfg, "/viktor/refresh")
 
     @app.post("/viktor/refresh")
     async def viktor_refresh(
@@ -162,20 +192,26 @@ def create_app() -> FastAPI:
         cfg: Annotated[Settings, Depends(get_settings)],
         _: Annotated[bool, Depends(verify_viktor_access)],
     ) -> dict:
-        if cfg.trading_mode != TradingMode.PAPER:
-            raise HTTPException(403, "Live trading is locked. Use TRADING_MODE=paper.")
-        async with PlatformClient() as platform:
-            row = await generate_paper_model_call(db, cfg, platform)
-        db.commit()
-        return {
-            "paper": True,
-            "id": row.id,
-            "market": row.market_slug,
-            "call": row.call,
-            "reason": row.reason,
-            "provider": row.provider,
-            "outcome": row.outcome,
-        }
+        return await run_viktor_refresh(db, cfg)
+
+    @app.get("/p/{slug}", response_class=HTMLResponse)
+    async def viktor_public_screen(
+        request: Request,
+        slug: str,
+        db: Annotated[Session, Depends(get_db)],
+        cfg: Annotated[Settings, Depends(get_settings)],
+    ) -> HTMLResponse:
+        assert_viktor_public_slug(slug, cfg)
+        return await build_viktor_page(request, db, cfg, f"/p/{slug}/refresh")
+
+    @app.post("/p/{slug}/refresh")
+    async def viktor_public_refresh(
+        slug: str,
+        db: Annotated[Session, Depends(get_db)],
+        cfg: Annotated[Settings, Depends(get_settings)],
+    ) -> dict:
+        assert_viktor_public_slug(slug, cfg)
+        return await run_viktor_refresh(db, cfg)
 
     @app.get("/", response_class=HTMLResponse)
     def dashboard(
