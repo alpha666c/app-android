@@ -14,6 +14,13 @@ class TradingMode(str, Enum):
     LIVE = "live"
 
 
+class AutomationTier(int, Enum):
+    OBSERVE = 0
+    PAPER_AUTO = 1
+    LIVE_MICRO = 2
+    LIVE_SCALED = 3
+
+
 def _parse_decimal(name: str, raw: str | None, required: bool = False) -> Decimal | None:
     if raw is None or raw.strip() == "":
         if required:
@@ -68,6 +75,15 @@ class Settings:
     signal_price_tolerance: Decimal
     execution_latency_ms: int
     poll_interval_seconds: int
+    automation_tier: AutomationTier
+    flow_consensus_min_wallets: int
+    use_stream_ingest: bool
+    ai_provider: str
+    ai_gateway_api_key: str | None
+    ai_model: str
+    live_scaled_unlocked: bool
+    micro_max_order_cost: Decimal | None
+    report_dir: str
     collateral_label: str = "pUSD"
 
 
@@ -97,6 +113,10 @@ def load_settings() -> Settings:
     live_armed = live_armed_env and trading_mode == TradingMode.LIVE
 
     polymarket_private_key = os.environ.get("POLYMARKET_PRIVATE_KEY") or None
+
+    micro_max = _parse_decimal("MICRO_MAX_ORDER_COST", os.environ.get("MICRO_MAX_ORDER_COST"))
+    tier_raw = _parse_int("AUTOMATION_TIER", os.environ.get("AUTOMATION_TIER"), default=1)
+    automation_tier = AutomationTier(tier_raw)
 
     if trading_mode == TradingMode.LIVE:
         risk = RiskLimits(
@@ -128,10 +148,26 @@ def load_settings() -> Settings:
                 "LIVE_MAX_DATA_AGE_SECONDS", os.environ.get("LIVE_MAX_DATA_AGE_SECONDS"), required=True
             ),
         )
+        if automation_tier == AutomationTier.LIVE_MICRO:
+            micro_order = micro_max or Decimal("0.25")
+            risk = RiskLimits(
+                starting_balance=risk.starting_balance,
+                max_order_cost=micro_order,
+                max_event_exposure=min(risk.max_event_exposure, Decimal("5")),
+                max_total_exposure=min(risk.max_total_exposure, Decimal("5")),
+                max_open_positions=risk.max_open_positions,
+                max_outstanding_orders=risk.max_outstanding_orders,
+                daily_loss_circuit_breaker=risk.daily_loss_circuit_breaker,
+                max_spread=risk.max_spread,
+                max_slippage=risk.max_slippage,
+                max_signal_age_seconds=risk.max_signal_age_seconds,
+                max_data_age_seconds=risk.max_data_age_seconds,
+            )
     else:
+        paper_max_order = micro_max if micro_max else Decimal("1")
         risk = RiskLimits(
             starting_balance=Decimal("100"),
-            max_order_cost=Decimal("1"),
+            max_order_cost=paper_max_order,
             max_event_exposure=Decimal("3"),
             max_total_exposure=Decimal("10"),
             max_open_positions=_parse_int(
@@ -172,6 +208,19 @@ def load_settings() -> Settings:
         poll_interval_seconds=_parse_int(
             "POLL_INTERVAL_SECONDS", os.environ.get("POLL_INTERVAL_SECONDS"), default=30
         ),
+        automation_tier=automation_tier,
+        flow_consensus_min_wallets=_parse_int(
+            "FLOW_CONSENSUS_MIN_WALLETS", os.environ.get("FLOW_CONSENSUS_MIN_WALLETS"), default=1
+        ),
+        use_stream_ingest=os.environ.get("USE_STREAM_INGEST", "false").lower()
+        in ("1", "true", "yes"),
+        ai_provider=os.environ.get("AI_PROVIDER", "none"),
+        ai_gateway_api_key=os.environ.get("AI_GATEWAY_API_KEY") or None,
+        ai_model=os.environ.get("AI_MODEL", "gpt-4o-mini"),
+        live_scaled_unlocked=os.environ.get("LIVE_SCALED_UNLOCKED", "false").lower()
+        in ("1", "true", "yes"),
+        micro_max_order_cost=micro_max,
+        report_dir=os.environ.get("REPORT_DIR", "evidence/reports"),
     )
 
 

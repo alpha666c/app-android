@@ -13,7 +13,10 @@ from polyscope.config import Settings
 from polyscope.db.models import Fill, LedgerAccount, OrderIntent, Position, Signal
 from polyscope.execution.fees import taker_fee_usdc
 from polyscope.execution.intents import get_or_create_intent
+from polyscope.platform.market_cache import resolve_market_meta
 from polyscope.platform.public_client import OrderBookSnapshot, PlatformClient
+from polyscope.platform.stream_ingest import BookCache
+from polyscope.research.shadow import record_shadow_rejection
 from polyscope.risk.engine import evaluate_order
 from polyscope.risk.reservations import commit_spend, release_reservation, reserve_funds
 
@@ -58,7 +61,10 @@ def _walk_book(
 
 
 async def process_approved_signals(
-    session: Session, settings: Settings, platform: PlatformClient
+    session: Session,
+    settings: Settings,
+    platform: PlatformClient,
+    book_cache: BookCache | None = None,
 ) -> int:
     signals = session.scalars(
         select(Signal).where(Signal.status == "approved")
@@ -66,7 +72,22 @@ async def process_approved_signals(
     processed = 0
     now = datetime.now(timezone.utc)
     for signal in signals:
-        book = await platform.fetch_order_book(signal.token_id)
+        if book_cache:
+            book = await book_cache.get_book(platform, signal.token_id)
+        else:
+            book = await platform.fetch_order_book(signal.token_id)
+        category = signal.market_category
+        if not category and signal.condition_id:
+            meta = await resolve_market_meta(
+                session, platform, signal.condition_id, signal.token_id
+            )
+            if meta:
+                category = meta.category
+                if meta.closed or meta.accepting_orders is False:
+                    signal.status = "rejected"
+                    signal.reject_reason = "market_closed"
+                    record_shadow_rejection(session, signal, signal.reference_price)
+                    continue
         data_age = (now - book.fetched_at).total_seconds()
         best_bid, best_ask, spread = _best_prices(book)
         if signal.side.upper() == "BUY":
@@ -82,10 +103,11 @@ async def process_approved_signals(
             signal.reject_reason = "price_moved"
             continue
         signal_age = (now - signal.observed_at).total_seconds()
-        fee = taker_fee_usdc(signal.size, executable, category="politics")
+        fee = taker_fee_usdc(signal.size, executable, category=category)
         if fee is None:
             signal.status = "rejected"
             signal.reject_reason = "missing_fees"
+            record_shadow_rejection(session, signal, executable)
             continue
         est_cost = signal.size * executable + fee
         decision = evaluate_order(
@@ -100,6 +122,7 @@ async def process_approved_signals(
         if not decision.allowed:
             signal.status = "rejected"
             signal.reject_reason = decision.reason
+            record_shadow_rejection(session, signal, executable)
             continue
 
         intent = get_or_create_intent(
@@ -128,7 +151,7 @@ async def process_approved_signals(
             intent.status = "rejected"
             continue
 
-        actual_fee = taker_fee_usdc(filled, avg_price, category="politics") or Decimal("0")
+        actual_fee = taker_fee_usdc(filled, avg_price, category=category) or Decimal("0")
         spent = cost + actual_fee
         commit_spend(session, intent.id, spent)
         session.add(

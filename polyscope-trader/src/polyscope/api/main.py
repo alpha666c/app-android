@@ -23,11 +23,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from polyscope.config import Settings, TradingMode, live_may_execute, load_settings
 from polyscope.db.models import (
     CohortWallet,
-    Fill,
     KillSwitchEvent,
     LedgerAccount,
     OrderIntent,
     Position,
+    ReadinessSnapshot,
+    ResearchBrief,
+    ShadowSignal,
     Signal,
     SystemState,
 )
@@ -99,11 +101,23 @@ def create_app() -> FastAPI:
         cohort = db.scalars(select(CohortWallet).order_by(CohortWallet.rank).limit(30)).all()
         positions = db.scalars(select(Position).where(Position.size > 0)).all()
         intents = db.scalars(select(OrderIntent).order_by(OrderIntent.id.desc()).limit(20)).all()
+        readiness = db.scalar(
+            select(ReadinessSnapshot).order_by(ReadinessSnapshot.id.desc()).limit(1)
+        )
+        briefs = db.scalars(
+            select(ResearchBrief).order_by(ResearchBrief.id.desc()).limit(3)
+        ).all()
+        shadow_count = db.scalar(select(func.count()).select_from(ShadowSignal)) or 0
         return templates.TemplateResponse(
             request,
             "dashboard.html",
             {
                 "mode": cfg.trading_mode.value,
+                "automation_tier": cfg.automation_tier.value,
+                "readiness_score": state.readiness_score,
+                "readiness": readiness,
+                "briefs": briefs,
+                "shadow_count": shadow_count,
                 "live_armed_env": cfg.live_armed,
                 "live_session_armed": state.live_session_armed,
                 "kill_switch": state.kill_switch,
@@ -113,6 +127,7 @@ def create_app() -> FastAPI:
                 "last_public_data": state.last_public_data_at,
                 "accounts": accounts,
                 "collateral_label": cfg.collateral_label,
+                "micro_max_order": cfg.micro_max_order_cost,
                 "signals": signals,
                 "cohort": cohort,
                 "positions": positions,

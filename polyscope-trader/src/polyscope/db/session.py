@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from polyscope.config import Settings
+from polyscope.db.migrate import run_migrations
 from polyscope.db.models import Base, LedgerAccount, SystemState
 
 
@@ -22,6 +23,7 @@ def make_engine(db_path: str):
 def init_db(settings: Settings) -> sessionmaker[Session]:
     engine = make_engine(settings.db_path)
     Base.metadata.create_all(engine)
+    run_migrations(engine)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     with SessionLocal() as session:
         state = session.get(SystemState, 1)

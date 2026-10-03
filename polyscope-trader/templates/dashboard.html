@@ -31,11 +31,29 @@
     Wallet addresses are not verified human identities. Signals are hypotheses, not edge guarantees.
   </p>
 
+  <h2>Automation & confidence</h2>
+  <ul>
+    <li>Tier: {{ automation_tier }} (0=observe, 1=paper-auto, 2=live-micro, 3=live-scaled)</li>
+    <li>Readiness score: {{ readiness_score if readiness_score is not none else 'unavailable' }} — not win probability</li>
+    {% if readiness %}<li>Latest breakdown: {{ readiness.breakdown_json }}</li>{% endif %}
+    <li>Shadow rejected signals tracked: {{ shadow_count }}</li>
+    {% if micro_max_order %}<li>Micro max order: {{ micro_max_order }} {{ collateral_label }}</li>{% endif %}
+  </ul>
+
   <h2>System health</h2>
   <ul>
     <li>Geoblock blocked: {{ geoblock_blocked }} ({{ geoblock_country or 'unknown' }})</li>
     <li>Last reconciliation: {{ last_reconciliation or 'never' }}</li>
     <li>Last public data: {{ last_public_data or 'never' }}</li>
+  </ul>
+
+  <h2>Research briefs (advisory)</h2>
+  <ul>
+    {% for b in briefs %}
+    <li>{{ b.topic }} ({{ b.provider }}): {{ b.content_json[:200] }}…</li>
+    {% else %}
+    <li>No AI briefs — set AI_PROVIDER and AI_GATEWAY_API_KEY for advisory summaries.</li>
+    {% endfor %}
   </ul>
 
   <h2>Balances (paper ledger)</h2>

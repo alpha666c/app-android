@@ -42,6 +42,10 @@ class SystemState(Base):
     day_baseline_realized: Mapped[Decimal | None] = mapped_column(Numeric(24, 8))
     day_baseline_unrealized: Mapped[Decimal | None] = mapped_column(Numeric(24, 8))
     day_boundary: Mapped[str | None] = mapped_column(String(16))
+    automation_tier: Mapped[int] = mapped_column(Integer, default=1)
+    last_order_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    live_stream_ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    readiness_score: Mapped[int | None] = mapped_column(Integer)
 
 
 class LedgerAccount(Base):
@@ -95,6 +99,12 @@ class Signal(Base):
     reject_reason: Mapped[str | None] = mapped_column(String(64))
     opposing_flow: Mapped[Decimal | None] = mapped_column(Numeric(24, 8))
     round_trip_flag: Mapped[bool] = mapped_column(Boolean, default=False)
+    best_bid_at_signal: Mapped[Decimal | None] = mapped_column(Numeric(24, 8))
+    best_ask_at_signal: Mapped[Decimal | None] = mapped_column(Numeric(24, 8))
+    spread_at_signal: Mapped[Decimal | None] = mapped_column(Numeric(24, 8))
+    market_category: Mapped[str | None] = mapped_column(String(64))
+    consensus_wallet_count: Mapped[int] = mapped_column(Integer, default=1)
+    devils_advocate: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     intents: Mapped[list[OrderIntent]] = relationship(back_populates="signal")
@@ -186,3 +196,65 @@ class HealthCheck(Base):
     service: Mapped[str] = mapped_column(String(64))
     ok: Mapped[bool] = mapped_column(Boolean)
     detail: Mapped[str | None] = mapped_column(Text)
+
+
+class MarketCache(Base):
+    __tablename__ = "market_cache"
+    __table_args__ = (UniqueConstraint("condition_id", "token_id", name="uq_market_cache"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    condition_id: Mapped[str] = mapped_column(String(128))
+    token_id: Mapped[str] = mapped_column(String(128))
+    category: Mapped[str | None] = mapped_column(String(64))
+    accepting_orders: Mapped[bool | None] = mapped_column(Boolean)
+    min_order_size: Mapped[Decimal | None] = mapped_column(Numeric(24, 8))
+    tick_size: Mapped[Decimal | None] = mapped_column(Numeric(24, 8))
+    event_slug: Mapped[str | None] = mapped_column(String(256))
+    closed: Mapped[bool | None] = mapped_column(Boolean)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Experiment(Base):
+    __tablename__ = "experiments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))
+    hypothesis: Mapped[str] = mapped_column(Text)
+    parameters_json: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    evidence_path: Mapped[str | None] = mapped_column(String(512))
+
+
+class ShadowSignal(Base):
+    __tablename__ = "shadow_signals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    signal_id: Mapped[int] = mapped_column(ForeignKey("signals.id"))
+    reject_reason: Mapped[str] = mapped_column(String(64))
+    hypothetical_entry: Mapped[Decimal] = mapped_column(Numeric(24, 8))
+    resolved_outcome_price: Mapped[Decimal | None] = mapped_column(Numeric(24, 8))
+    hypothetical_pnl: Mapped[Decimal | None] = mapped_column(Numeric(24, 8))
+    market_resolved: Mapped[bool] = mapped_column(Boolean, default=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ResearchBrief(Base):
+    __tablename__ = "research_briefs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    topic: Mapped[str] = mapped_column(String(128))
+    provider: Mapped[str] = mapped_column(String(32))
+    content_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ReadinessSnapshot(Base):
+    __tablename__ = "readiness_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    score: Mapped[int] = mapped_column(Integer)
+    tier: Mapped[int] = mapped_column(Integer)
+    breakdown_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

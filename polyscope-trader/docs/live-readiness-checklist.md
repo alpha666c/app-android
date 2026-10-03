@@ -4,6 +4,8 @@ Use before arming LIVE. All items must be **Yes** unless marked N/A.
 
 ## Configuration
 
+- [ ] `AUTOMATION_TIER=2` for live-micro (or `3` only with `LIVE_SCALED_UNLOCKED=true` and calibration review)
+- [ ] `MICRO_MAX_ORDER_COST` set (e.g. 0.25 pUSD)
 - [ ] `TRADING_MODE=live`
 - [ ] All `LIVE_*` limits set explicitly (budget, order cost, event/total exposure, positions/orders caps, daily breaker, spread/slippage/signal/data age)
 - [ ] `POLYMARKET_PRIVATE_KEY` in backend env only (never chat/logs)

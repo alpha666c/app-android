@@ -112,12 +112,14 @@ class SecureLiveGateway(LiveGateway):
 async def create_live_gateway(
     enabled: bool, private_key: str | None
 ) -> LiveGateway:
-    if not enabled or not private_key:
+    if not private_key:
         return DisabledLiveGateway()
     try:
         from polymarket import AsyncSecureClient
 
         client = await AsyncSecureClient.create(private_key=private_key)
+        if not enabled:
+            return DisabledLiveGateway()
         return SecureLiveGateway(client)
     except Exception:
         return DisabledLiveGateway()
