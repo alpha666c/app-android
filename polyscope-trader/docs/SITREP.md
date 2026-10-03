@@ -1,48 +1,34 @@
-# SITREP — PolyScope Trader v0.1.0
+# SITREP — PolyScope Trader v0.2.0
 
-**Date:** 2026-10-02
+**Date:** 2026-10-03
 
-## Completed
+## Completed (roadmap)
 
-- Isolated project [`polyscope-trader/`](../) with Python 3.11+ package, FastAPI dashboard, background worker, SQLite state
-- Modes: RESEARCH / PAPER (default) / LIVE (fail-closed)
-- Public platform wrapper (`polymarket-client` + geoblock HTTP)
-- Leaderboard cohort discovery + wallet activity signal ingest
-- Paper execution (order-book walk, fees, spread/data-age/signal-age gates)
-- Risk engine + atomic reservations + daily circuit breaker baseline
-- Dashboard (mode, health, cohort, signals, balances, exports)
-- Kill switch API with unconfirmed cancel accounting
-- LIVE gateway stub (`DisabledLiveGateway` default; `SecureLiveGateway` via async factory when configured)
-- Docker Compose + `.env.example` + README
-- **Tests:** `13 passed` (see below)
-- **Smoke:** `evidence/smoke_20261002T195252Z.json` — public APIs reachable; geoblock **blocked** in cloud (US)
+- Market metadata cache ([`platform/market_cache.py`](../src/polyscope/platform/market_cache.py)) wired into paper execution
+- Book snapshots + spread on signals; flow consensus + devil's advocate rules
+- Optional stream ingest ([`platform/stream_ingest.py`](../src/polyscope/platform/stream_ingest.py)) with poll fallback
+- Reconciliation before each worker tick ([`worker/reconcile.py`](../src/polyscope/worker/reconcile.py))
+- LIVE order heartbeat + user stream supervisors ([`worker/heartbeat.py`](../src/polyscope/worker/heartbeat.py), [`worker/user_stream.py`](../src/polyscope/worker/user_stream.py))
+- Research OS: experiments, wallet studies, shadow rejections, markdown reports
+- Pluggable AI research briefs ([`research/ai/`](../src/polyscope/research/ai/)) — advisory JSON only
+- Readiness score + automation tiers 0–3 ([`risk/confidence.py`](../src/polyscope/risk/confidence.py))
+- Micro LIVE limits via `MICRO_MAX_ORDER_COST` + `AUTOMATION_TIER=2`
+- Operator playbook ([OPERATOR.md](OPERATOR.md))
+- **Tests:** 17 passed
 
 ## Partial
 
-- LIVE session arming API implemented; **not exercised** against real CLOB writes (geoblock + intentional disable)
-- User WebSocket + order heartbeat loops **not** wired into worker (documented; required before LIVE)
-- Market category for fees defaults to `politics` in paper path when enriching from activity-only signals — should join Gamma market metadata
-- RTDS / trade stream subscription not implemented (polling `list_activity` only)
+- LIVE heartbeat/stream run when `TRADING_MODE=live` + credentials; not validated on eligible IP in CI
+- AI provider: OpenAI-compatible path implemented; Anthropic stub
+- Stream ingest best-effort (SDK subscribe may fail silently → poll)
 
 ## Blocked
 
-- **LIVE trading in this environment:** geoblock reports `blocked: true` (US)
-- No funded wallet or production credentials configured (by design)
-
-## Untested
-
-- End-to-end LIVE order placement, cancellation, reconciliation on CLOB
-- Multi-worker failover beyond executor lease timeout
-- Docker image build in CI (not run in agent)
+- Cloud agent geoblock US — LIVE not testable here
 
 ## Test evidence
 
 ```text
 cd polyscope-trader && DASHBOARD_PASSWORD=test-secret TRADING_MODE=paper python3 -m pytest -q
-# 13 passed
+# 17 passed
 ```
-
-## Operational notes
-
-- “No qualifying opportunities” is expected when signals fail freshness, liquidity, or risk checks.
-- Paper PnL does **not** unlock LIVE automatically.

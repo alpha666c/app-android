@@ -43,6 +43,23 @@ Artifacts land in `evidence/smoke_*.json`.
 pytest -q
 ```
 
+## Automation tiers
+
+| Tier | Value | Behavior |
+|------|-------|----------|
+| Observe | 0 | Research + signals only |
+| Paper-auto | 1 | Default — auto paper execution when gates pass |
+| Live-micro | 2 | LIVE with micro limits |
+| Live-scaled | 3 | Requires explicit unlock |
+
+Set `AUTOMATION_TIER` in `.env`. Readiness score on dashboard is **not** win probability.
+
+## AI research (optional)
+
+Set `AI_PROVIDER=openai_compatible` and `AI_GATEWAY_API_KEY` for advisory briefs. LLM does **not** place orders.
+
+See [docs/OPERATOR.md](docs/OPERATOR.md).
+
 ## Limitations
 
 - No verified 90-day wallet study; leaderboard windows are API-labeled only
