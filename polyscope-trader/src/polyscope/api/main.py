@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Annotated
 
 import secrets
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
@@ -20,12 +20,19 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from polyscope.config import Settings, TradingMode, live_may_execute, load_settings
+from polyscope.config import (
+    Settings,
+    TradingMode,
+    assert_paper_only_for_research,
+    live_may_execute,
+    load_settings,
+)
 from polyscope.db.models import (
     CohortWallet,
     KillSwitchEvent,
     LedgerAccount,
     OrderIntent,
+    PaperModelCall,
     Position,
     ReadinessSnapshot,
     ResearchBrief,
@@ -35,6 +42,8 @@ from polyscope.db.models import (
 )
 from polyscope.db.session import get_system_state, init_db
 from polyscope.logging_utils import configure_logging
+from polyscope.platform.public_client import PlatformClient
+from polyscope.research.ai.paper_signal import fetch_open_markets, generate_paper_model_call
 
 logger = logging.getLogger(__name__)
 security = HTTPBasic()
@@ -76,6 +85,30 @@ def verify_auth(
     return creds.username
 
 
+def verify_viktor_access(
+    creds: Annotated[HTTPBasicCredentials, Depends(HTTPBasic(auto_error=False))],
+    cfg: Annotated[Settings, Depends(get_settings)],
+    token: Annotated[str | None, Query()] = None,
+) -> bool:
+    if cfg.viktor_view_token and token and secrets.compare_digest(token, cfg.viktor_view_token):
+        return True
+    if creds is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    user_ok = secrets.compare_digest(creds.username, cfg.dashboard_user)
+    pass_ok = secrets.compare_digest(creds.password, cfg.dashboard_password)
+    if not (user_ok and pass_ok):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return True
+
+
 def create_app() -> FastAPI:
     global settings, SessionLocal
     configure_logging()
@@ -85,6 +118,64 @@ def create_app() -> FastAPI:
     static_dir = BASE_DIR / "static"
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    @app.get("/viktor", response_class=HTMLResponse)
+    async def viktor_screen(
+        request: Request,
+        db: Annotated[Session, Depends(get_db)],
+        cfg: Annotated[Settings, Depends(get_settings)],
+        _: Annotated[bool, Depends(verify_viktor_access)],
+    ) -> HTMLResponse:
+        try:
+            assert_paper_only_for_research(cfg)
+        except ValueError as exc:
+            raise HTTPException(503, str(exc)) from exc
+        latest = db.scalar(
+            select(PaperModelCall).order_by(PaperModelCall.id.desc()).limit(1)
+        )
+        history = db.scalars(
+            select(PaperModelCall).order_by(PaperModelCall.id.desc()).limit(30)
+        ).all()
+        markets: list[dict] = []
+        async with PlatformClient() as platform:
+            try:
+                markets = await fetch_open_markets(platform, limit=6)
+            except Exception:
+                markets = []
+        return templates.TemplateResponse(
+            request,
+            "viktor.html",
+            {
+                "paper_only": True,
+                "live_locked": True,
+                "trading_mode": cfg.trading_mode.value,
+                "provider_label": latest.provider if latest else "none",
+                "latest": latest,
+                "history": history,
+                "markets": markets,
+            },
+        )
+
+    @app.post("/viktor/refresh")
+    async def viktor_refresh(
+        db: Annotated[Session, Depends(get_db)],
+        cfg: Annotated[Settings, Depends(get_settings)],
+        _: Annotated[bool, Depends(verify_viktor_access)],
+    ) -> dict:
+        if cfg.trading_mode != TradingMode.PAPER:
+            raise HTTPException(403, "Live trading is locked. Use TRADING_MODE=paper.")
+        async with PlatformClient() as platform:
+            row = await generate_paper_model_call(db, cfg, platform)
+        db.commit()
+        return {
+            "paper": True,
+            "id": row.id,
+            "market": row.market_slug,
+            "call": row.call,
+            "reason": row.reason,
+            "provider": row.provider,
+            "outcome": row.outcome,
+        }
 
     @app.get("/", response_class=HTMLResponse)
     def dashboard(

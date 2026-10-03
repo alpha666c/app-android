@@ -258,3 +258,20 @@ class ReadinessSnapshot(Base):
     tier: Mapped[int] = mapped_column(Integer)
     breakdown_json: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PaperModelCall(Base):
+    """Research model paper suggestion only. Never triggers live execution."""
+
+    __tablename__ = "paper_model_calls"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    market_slug: Mapped[str] = mapped_column(String(256), index=True)
+    market_title: Mapped[str] = mapped_column(String(512))
+    condition_id: Mapped[str | None] = mapped_column(String(128))
+    call: Mapped[str] = mapped_column(String(32))
+    reason: Mapped[str] = mapped_column(Text)
+    provider: Mapped[str] = mapped_column(String(64))
+    mode: Mapped[str] = mapped_column(String(16), default="paper")
+    outcome: Mapped[str | None] = mapped_column(String(256))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

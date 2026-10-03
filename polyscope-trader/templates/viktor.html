@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PolyScope Paper</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, sans-serif; background: #0c1117; color: #e8edf2; }
+    body { margin: 0; padding: 1rem; max-width: 32rem; margin-inline: auto; }
+    .badge { display: inline-block; background: #1a4d3a; color: #b8f0d8; padding: 0.25rem 0.6rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
+    .locked { background: #3a1a1a; color: #f0b8b8; margin-left: 0.5rem; }
+    h1 { font-size: 1.25rem; margin: 0.75rem 0 0.25rem; }
+    .muted { color: #8b98a8; font-size: 0.85rem; line-height: 1.4; }
+    .card { background: #151c24; border: 1px solid #2a3544; border-radius: 12px; padding: 1rem; margin: 1rem 0; }
+    .call { font-size: 1.1rem; font-weight: 600; margin: 0.5rem 0; }
+    .reason { font-size: 0.95rem; line-height: 1.45; }
+    button { width: 100%; padding: 0.75rem; border: none; border-radius: 10px; background: #2d6cdf; color: #fff; font-size: 1rem; font-weight: 600; margin: 0.5rem 0; }
+    button:disabled { opacity: 0.5; }
+    ul.markets { list-style: none; padding: 0; margin: 0; }
+    ul.markets li { padding: 0.5rem 0; border-bottom: 1px solid #2a3544; font-size: 0.9rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    th, td { text-align: left; padding: 0.4rem 0.2rem; border-bottom: 1px solid #2a3544; vertical-align: top; }
+    .outcome { color: #8b98a8; font-style: italic; }
+  </style>
+</head>
+<body>
+  <span class="badge">PAPER ONLY</span>
+  <span class="badge locked">LIVE LOCKED</span>
+  <h1>Model research</h1>
+  <p class="muted">Nothing here places a real bet. Calls are saved for you to score later.</p>
+
+  <div class="card">
+    <div class="muted">Current paper call · provider: {{ provider_label }}</div>
+    {% if latest %}
+    <div class="call">{{ latest.call }} · {{ latest.market_title }}</div>
+    <div class="reason">{{ latest.reason }}</div>
+    <div class="muted" style="margin-top:0.5rem">{{ latest.created_at }} UTC</div>
+    <div class="muted">Outcome (fill later): <span class="outcome">{{ latest.outcome or 'pending' }}</span></div>
+    {% else %}
+    <p class="muted">No paper call yet. Tap refresh to ask the research model.</p>
+    {% endif %}
+    <button type="button" id="refreshBtn">Refresh paper call</button>
+    <p id="status" class="muted"></p>
+  </div>
+
+  <h2 style="font-size:1rem">Open markets</h2>
+  <ul class="markets">
+    {% for m in markets %}
+    <li>{{ m.title }}</li>
+    {% else %}
+    <li class="muted">Markets unavailable right now.</li>
+    {% endfor %}
+  </ul>
+
+  <h2 style="font-size:1rem">Past paper calls</h2>
+  <table>
+    <thead><tr><th>Time</th><th>Call</th><th>Reason</th><th>Outcome</th></tr></thead>
+    <tbody>
+      {% for h in history %}
+      <tr>
+        <td>{{ h.created_at.strftime('%m-%d %H:%M') if h.created_at else '' }}</td>
+        <td>{{ h.call }}</td>
+        <td>{{ h.reason[:80] }}{% if h.reason|length > 80 %}…{% endif %}</td>
+        <td class="outcome">{{ h.outcome or 'pending' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="muted">No history yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <script>
+    document.getElementById('refreshBtn').addEventListener('click', async () => {
+      const btn = document.getElementById('refreshBtn');
+      const status = document.getElementById('status');
+      btn.disabled = true;
+      status.textContent = 'Asking research model (paper only)...';
+      try {
+        const r = await fetch('/viktor/refresh', { method: 'POST', credentials: 'same-origin' });
+        if (!r.ok) throw new Error(await r.text());
+        status.textContent = 'Saved. Reloading...';
+        location.reload();
+      } catch (e) {
+        status.textContent = 'Refresh failed. Check login.';
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

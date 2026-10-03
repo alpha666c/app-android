@@ -21,6 +21,13 @@ class BriefOutput:
     cautions: list[str]
 
 
+@dataclass
+class PaperCallOutput:
+    call: str
+    reason: str
+    provider: str
+
+
 class ResearchAIClient:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -79,3 +86,68 @@ class ResearchAIClient:
     async def _anthropic(self, topic: str, prompt: str) -> BriefOutput | None:
         logger.info("anthropic provider not fully configured; skip")
         return None
+
+    def provider_display_name(self) -> str:
+        if self.settings.ai_provider == "none" or not self.settings.ai_gateway_api_key:
+            return "rules_fallback"
+        return self.settings.ai_provider
+
+    async def suggest_paper_call(self, market_facts: dict) -> PaperCallOutput:
+        """Research-only paper suggestion. Never places orders."""
+        if not self.available():
+            return PaperCallOutput(
+                call="SKIP",
+                reason=(
+                    "Paper only. No model key configured. Set AI_PROVIDER and "
+                    "AI_GATEWAY_API_KEY in the server environment to enable model calls."
+                ),
+                provider="rules_fallback",
+            )
+        prompt = (
+            "You advise on prediction markets for PAPER research only. "
+            "Output ONLY JSON with keys: call, reason. "
+            "call must be one of: BUY_YES, BUY_NO, SKIP. "
+            "reason is one or two short sentences, no hype. "
+            "Do not mention order sizes or live trading. Market facts:\n"
+            + json.dumps(market_facts, default=str)
+        )
+        if self.settings.ai_provider == "openai_compatible":
+            parsed = await self._openai_json(prompt)
+            if parsed:
+                call = str(parsed.get("call", "SKIP")).upper()
+                if call not in ("BUY_YES", "BUY_NO", "SKIP"):
+                    call = "SKIP"
+                return PaperCallOutput(
+                    call=call,
+                    reason=str(parsed.get("reason", "No reason returned.")),
+                    provider="openai_compatible",
+                )
+        return PaperCallOutput(
+            call="SKIP",
+            reason="Model provider unavailable. Paper mode only.",
+            provider=self.provider_display_name(),
+        )
+
+    async def _openai_json(self, prompt: str) -> dict | None:
+        url = "https://api.openai.com/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.settings.ai_gateway_api_key}",
+            "Content-Type": "application/json",
+        }
+        body = {
+            "model": self.settings.ai_model,
+            "messages": [
+                {"role": "system", "content": "Respond with JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.2,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as http:
+                resp = await http.post(url, headers=headers, json=body)
+                resp.raise_for_status()
+                content = resp.json()["choices"][0]["message"]["content"]
+                return json.loads(content)
+        except Exception as exc:
+            logger.warning("paper call AI failed: %s", exc)
+            return None

@@ -84,6 +84,7 @@ class Settings:
     live_scaled_unlocked: bool
     micro_max_order_cost: Decimal | None
     report_dir: str
+    viktor_view_token: str | None
     collateral_label: str = "pUSD"
 
 
@@ -221,7 +222,15 @@ def load_settings() -> Settings:
         in ("1", "true", "yes"),
         micro_max_order_cost=micro_max,
         report_dir=os.environ.get("REPORT_DIR", "evidence/reports"),
+        viktor_view_token=os.environ.get("VIKTOR_VIEW_TOKEN") or None,
     )
+
+
+def assert_paper_only_for_research(settings: Settings) -> None:
+    if settings.trading_mode != TradingMode.PAPER:
+        raise ValueError(
+            "Viktor research screen requires TRADING_MODE=paper"
+        )
 
 
 def live_may_execute(settings: Settings, session_armed: bool, geoblock_blocked: bool | None) -> bool:
