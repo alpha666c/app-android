@@ -87,6 +87,7 @@ class Settings:
     viktor_view_token: str | None
     viktor_public_slug: str | None
     vault_dir: str
+    paper_bot_interval_seconds: int
     collateral_label: str = "pUSD"
 
 
@@ -227,6 +228,11 @@ def load_settings() -> Settings:
         viktor_view_token=os.environ.get("VIKTOR_VIEW_TOKEN") or None,
         viktor_public_slug=os.environ.get("VIKTOR_PUBLIC_SLUG") or None,
         vault_dir=os.environ.get("VAULT_DIR", "vault"),
+        paper_bot_interval_seconds=_parse_int(
+            "PAPER_BOT_INTERVAL_SECONDS",
+            os.environ.get("PAPER_BOT_INTERVAL_SECONDS"),
+            default=120,
+        ),
     )
 
 

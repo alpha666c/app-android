@@ -81,6 +81,7 @@ def test_tier_observe_blocks_auto():
         viktor_view_token=None,
         viktor_public_slug=None,
         vault_dir="vault",
+        paper_bot_interval_seconds=120,
     )
     assert tier_allows_auto_execute(settings, AutomationTier.OBSERVE) is False
 

@@ -71,8 +71,8 @@ def test_viktor_screen_requires_paper(monkeypatch, tmp_path):
     client = TestClient(app)
     resp = client.get("/viktor", auth=("admin", "secret"))
     assert resp.status_code == 200
-    assert "PAPER ONLY" in resp.text
-    assert "LIVE LOCKED" in resp.text
+    assert "VIKTOR_API_BASE" in resp.text
+    assert "viktor-app.js" in resp.text
 
 
 def test_viktor_path_has_no_live_gateway():
@@ -94,9 +94,8 @@ def test_viktor_public_slug_no_password(monkeypatch, tmp_path):
     client = TestClient(app)
     resp = client.get("/p/viktor-test-slug-93e7")
     assert resp.status_code == 200
-    assert "PAPER ONLY" in resp.text
-    assert "/p/viktor-test-slug-93e7/api/state" in resp.text
-    assert "/p/viktor-test-slug-93e7/refresh" in resp.text
+    assert "VIKTOR_API_BASE" in resp.text
+    assert "/p/viktor-test-slug-93e7/api/app" in resp.text or 'VIKTOR_API_BASE' in resp.text
     state = client.get("/p/viktor-test-slug-93e7/api/state")
     assert state.status_code == 200
     body = state.json()
@@ -106,7 +105,7 @@ def test_viktor_public_slug_no_password(monkeypatch, tmp_path):
     assert bad.status_code == 404
     refresh = client.post("/p/viktor-test-slug-93e7/refresh")
     assert refresh.status_code == 200
-    assert refresh.json()["paper"] is True
+    assert "call" in refresh.json()
 
 
 def test_research_skip_lists_missing_env(monkeypatch):

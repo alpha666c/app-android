@@ -20,6 +20,9 @@ def run_migrations(engine: Engine) -> None:
                 ("last_order_heartbeat_at", "TIMESTAMP"),
                 ("live_stream_ok", "BOOLEAN DEFAULT 0"),
                 ("readiness_score", "INTEGER"),
+                ("paper_bot_last_at", "TIMESTAMP"),
+                ("paper_bot_runs", "INTEGER DEFAULT 0"),
+                ("paper_bot_paused", "BOOLEAN DEFAULT 0"),
             ):
                 if not _has_column(engine, "system_state", col):
                     conn.execute(text(f"ALTER TABLE system_state ADD COLUMN {col} {ddl}"))
@@ -41,6 +44,9 @@ def run_migrations(engine: Engine) -> None:
                 ("evidence_json", "TEXT"),
                 ("vault_decision_path", "VARCHAR(512)"),
                 ("tags_json", "TEXT"),
+                ("stake_usdc", "NUMERIC(24,8)"),
+                ("size_shares", "NUMERIC(24,8)"),
+                ("side", "VARCHAR(8)"),
             ):
                 if not _has_column(engine, "paper_model_calls", col):
                     conn.execute(text(f"ALTER TABLE paper_model_calls ADD COLUMN {col} {ddl}"))

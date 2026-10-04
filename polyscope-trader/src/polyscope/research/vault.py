@@ -15,7 +15,7 @@ def _utc_iso(dt: datetime | None = None) -> str:
 
 
 def ensure_vault_layout(vault_root: Path) -> None:
-    for sub in ("events", "hypotheses", "decisions"):
+    for sub in ("events", "hypotheses", "decisions", "lessons"):
         (vault_root / sub).mkdir(parents=True, exist_ok=True)
 
 

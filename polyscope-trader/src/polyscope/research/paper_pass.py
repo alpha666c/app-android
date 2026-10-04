@@ -17,6 +17,7 @@ from polyscope.research.ai.client import ResearchAIClient
 from polyscope.research.challenger import challenge_proposal, normalize_action
 from polyscope.research.evidence import build_market_evidence, evidence_is_thin
 from polyscope.research.markets import fetch_open_markets
+from polyscope.research.paper_lessons import lessons_to_facts, load_lessons_for_topic, market_topic_key
 from polyscope.research.paper_labels import compute_paper_tags_and_labels, tags_payload_json
 from polyscope.research.vault import (
     _utc_iso,
@@ -77,6 +78,8 @@ async def run_paper_research_pass(
         )
 
     featured = _pick_featured_market(markets, session)
+    topic = market_topic_key(featured.get("category"), featured.get("slug", ""))
+    prior_lessons = load_lessons_for_topic(session, topic, limit=5)
     evidence = build_market_evidence(featured, when)
     write_event_snapshot(
         vault_root,
@@ -162,6 +165,7 @@ async def run_paper_research_pass(
                 "yes_buy_price": str(evidence.yes_buy_price) if evidence.yes_buy_price else None,
                 "spread_flag": evidence.spread_flag,
                 "peer_market_titles": [m.get("title") for m in markets[1:4]],
+                "prior_lessons": lessons_to_facts(prior_lessons),
             }
         )
         action = normalize_action(suggestion.action)

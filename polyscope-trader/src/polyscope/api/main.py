@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
@@ -43,8 +44,13 @@ from polyscope.db.models import (
 from polyscope.db.session import get_system_state, init_db
 from polyscope.logging_utils import configure_logging
 from polyscope.platform.public_client import PlatformClient
-from polyscope.research.ai.paper_signal import fetch_open_markets, generate_paper_model_call
-from polyscope.research.paper_labels import paper_call_to_api
+from polyscope.api.paper_app import (
+    build_paper_app_state,
+    get_decision_detail,
+    get_lesson_detail,
+    get_position_detail,
+)
+from polyscope.research.paper_bot import run_paper_bot_tick
 
 logger = logging.getLogger(__name__)
 security = HTTPBasic()
@@ -115,37 +121,20 @@ def assert_viktor_public_slug(slug: str, cfg: Settings) -> None:
         raise HTTPException(status_code=404, detail="Not found")
 
 
-async def viktor_paper_state(db: Session, cfg: Settings) -> dict:
-    """JSON state for the Viktor paper app (database-backed)."""
-    assert_paper_only_for_research(cfg)
-    rows = db.scalars(select(PaperModelCall).order_by(PaperModelCall.id.desc()).limit(30)).all()
-    loop_pass_count = db.scalar(select(func.count()).select_from(PaperModelCall)) or 0
-    markets: list[dict] = []
+async def run_paper_bot_once(db: Session, cfg: Settings) -> dict:
+    if cfg.trading_mode != TradingMode.PAPER:
+        raise HTTPException(403, "Live trading is locked. Use TRADING_MODE=paper.")
     async with PlatformClient() as platform:
-        try:
-            raw = await fetch_open_markets(platform, limit=6)
-            markets = [{"title": m.get("title"), "slug": m.get("slug")} for m in raw]
-        except Exception:
-            markets = []
-    decisions = [paper_call_to_api(r) for r in rows]
-    latest = decisions[0] if decisions else None
-    return {
-        "paper_only": True,
-        "live_locked": True,
-        "trading_mode": cfg.trading_mode.value,
-        "loop_pass_count": loop_pass_count,
-        "latest": latest,
-        "decisions": decisions,
-        "markets": markets,
-    }
+        result = await run_paper_bot_tick(db, cfg, platform)
+    db.commit()
+    result["app"] = await build_paper_app_state(db, cfg)
+    return result
 
 
 async def build_viktor_page(
     request: Request,
-    db: Session,
     cfg: Settings,
-    api_state_path: str,
-    api_refresh_path: str,
+    api_base: str,
 ) -> HTMLResponse:
     try:
         assert_paper_only_for_research(cfg)
@@ -154,20 +143,25 @@ async def build_viktor_page(
     return templates.TemplateResponse(
         request,
         "viktor.html",
-        {
-            "api_state_path": api_state_path,
-            "api_refresh_path": api_refresh_path,
-        },
+        {"api_base": api_base.rstrip("/")},
     )
 
 
-async def run_viktor_refresh(db: Session, cfg: Settings) -> dict:
-    if cfg.trading_mode != TradingMode.PAPER:
-        raise HTTPException(403, "Live trading is locked. Use TRADING_MODE=paper.")
-    async with PlatformClient() as platform:
-        row = await generate_paper_model_call(db, cfg, platform)
-    db.commit()
-    return paper_call_to_api(row)
+async def _paper_bot_background_loop(session_factory: sessionmaker[Session], cfg: Settings) -> None:
+    while True:
+        await asyncio.sleep(max(30, cfg.paper_bot_interval_seconds))
+        try:
+            with session_factory() as db:
+                state = get_system_state(db)
+                if state.paper_bot_paused:
+                    continue
+                if cfg.trading_mode != TradingMode.PAPER:
+                    continue
+                async with PlatformClient() as platform:
+                    await run_paper_bot_tick(db, cfg, platform)
+                db.commit()
+        except Exception:
+            logger.exception("paper bot background tick failed")
 
 
 def create_app() -> FastAPI:
@@ -180,16 +174,29 @@ def create_app() -> FastAPI:
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
+    cfg_snapshot = settings
+
+    @app.on_event("startup")
+    async def start_paper_bot_loop() -> None:
+        if cfg_snapshot.trading_mode == TradingMode.PAPER:
+            asyncio.create_task(_paper_bot_background_loop(SessionLocal, cfg_snapshot))
+
     @app.get("/viktor", response_class=HTMLResponse)
     async def viktor_screen(
         request: Request,
-        db: Annotated[Session, Depends(get_db)],
         cfg: Annotated[Settings, Depends(get_settings)],
         _: Annotated[bool, Depends(verify_viktor_access)],
     ) -> HTMLResponse:
-        return await build_viktor_page(
-            request, db, cfg, "/viktor/api/state", "/viktor/refresh"
-        )
+        return await build_viktor_page(request, cfg, "/viktor/api")
+
+    @app.get("/viktor/api/app")
+    async def viktor_app(
+        db: Annotated[Session, Depends(get_db)],
+        cfg: Annotated[Settings, Depends(get_settings)],
+        _: Annotated[bool, Depends(verify_viktor_access)],
+        tag: Annotated[str | None, Query()] = None,
+    ) -> dict:
+        return await build_paper_app_state(db, cfg, tag=tag)
 
     @app.get("/viktor/api/state")
     async def viktor_api_state(
@@ -197,7 +204,73 @@ def create_app() -> FastAPI:
         cfg: Annotated[Settings, Depends(get_settings)],
         _: Annotated[bool, Depends(verify_viktor_access)],
     ) -> dict:
-        return await viktor_paper_state(db, cfg)
+        return await build_paper_app_state(db, cfg)
+
+    @app.post("/viktor/api/bot/run-once")
+    async def viktor_bot_run(
+        db: Annotated[Session, Depends(get_db)],
+        cfg: Annotated[Settings, Depends(get_settings)],
+        _: Annotated[bool, Depends(verify_viktor_access)],
+    ) -> dict:
+        return await run_paper_bot_once(db, cfg)
+
+    @app.post("/viktor/api/bot/pause")
+    async def viktor_bot_pause(
+        db: Annotated[Session, Depends(get_db)],
+        cfg: Annotated[Settings, Depends(get_settings)],
+        _: Annotated[bool, Depends(verify_viktor_access)],
+    ) -> dict:
+        state = get_system_state(db)
+        state.paper_bot_paused = True
+        db.commit()
+        return {"paused": True, "app": await build_paper_app_state(db, cfg)}
+
+    @app.post("/viktor/api/bot/resume")
+    async def viktor_bot_resume(
+        db: Annotated[Session, Depends(get_db)],
+        cfg: Annotated[Settings, Depends(get_settings)],
+        _: Annotated[bool, Depends(verify_viktor_access)],
+    ) -> dict:
+        state = get_system_state(db)
+        state.paper_bot_paused = False
+        db.commit()
+        return {"paused": False, "app": await build_paper_app_state(db, cfg)}
+
+    @app.get("/viktor/api/decisions/{decision_id}")
+    async def viktor_decision(
+        decision_id: int,
+        db: Annotated[Session, Depends(get_db)],
+        cfg: Annotated[Settings, Depends(get_settings)],
+        _: Annotated[bool, Depends(verify_viktor_access)],
+    ) -> dict:
+        detail = get_decision_detail(db, decision_id)
+        if detail is None:
+            raise HTTPException(404, "Decision not found")
+        return detail
+
+    @app.get("/viktor/api/positions/{position_id}")
+    async def viktor_position(
+        position_id: int,
+        db: Annotated[Session, Depends(get_db)],
+        cfg: Annotated[Settings, Depends(get_settings)],
+        _: Annotated[bool, Depends(verify_viktor_access)],
+    ) -> dict:
+        detail = get_position_detail(db, position_id)
+        if detail is None:
+            raise HTTPException(404, "Position not found")
+        return detail
+
+    @app.get("/viktor/api/lessons/{lesson_id}")
+    async def viktor_lesson(
+        lesson_id: int,
+        db: Annotated[Session, Depends(get_db)],
+        cfg: Annotated[Settings, Depends(get_settings)],
+        _: Annotated[bool, Depends(verify_viktor_access)],
+    ) -> dict:
+        detail = get_lesson_detail(db, lesson_id)
+        if detail is None:
+            raise HTTPException(404, "Lesson not found")
+        return detail
 
     @app.post("/viktor/refresh")
     async def viktor_refresh(
@@ -205,19 +278,26 @@ def create_app() -> FastAPI:
         cfg: Annotated[Settings, Depends(get_settings)],
         _: Annotated[bool, Depends(verify_viktor_access)],
     ) -> dict:
-        return await run_viktor_refresh(db, cfg)
+        return await run_paper_bot_once(db, cfg)
 
     @app.get("/p/{slug}", response_class=HTMLResponse)
     async def viktor_public_screen(
         request: Request,
         slug: str,
-        db: Annotated[Session, Depends(get_db)],
         cfg: Annotated[Settings, Depends(get_settings)],
     ) -> HTMLResponse:
         assert_viktor_public_slug(slug, cfg)
-        return await build_viktor_page(
-            request, db, cfg, f"/p/{slug}/api/state", f"/p/{slug}/refresh"
-        )
+        return await build_viktor_page(request, cfg, f"/p/{slug}/api")
+
+    @app.get("/p/{slug}/api/app")
+    async def public_app(
+        slug: str,
+        db: Annotated[Session, Depends(get_db)],
+        cfg: Annotated[Settings, Depends(get_settings)],
+        tag: Annotated[str | None, Query()] = None,
+    ) -> dict:
+        assert_viktor_public_slug(slug, cfg)
+        return await build_paper_app_state(db, cfg, tag=tag)
 
     @app.get("/p/{slug}/api/state")
     async def viktor_public_api_state(
@@ -226,7 +306,79 @@ def create_app() -> FastAPI:
         cfg: Annotated[Settings, Depends(get_settings)],
     ) -> dict:
         assert_viktor_public_slug(slug, cfg)
-        return await viktor_paper_state(db, cfg)
+        return await build_paper_app_state(db, cfg)
+
+    @app.post("/p/{slug}/api/bot/run-once")
+    async def public_bot_run(
+        slug: str,
+        db: Annotated[Session, Depends(get_db)],
+        cfg: Annotated[Settings, Depends(get_settings)],
+    ) -> dict:
+        assert_viktor_public_slug(slug, cfg)
+        return await run_paper_bot_once(db, cfg)
+
+    @app.post("/p/{slug}/api/bot/pause")
+    async def public_bot_pause(
+        slug: str,
+        db: Annotated[Session, Depends(get_db)],
+        cfg: Annotated[Settings, Depends(get_settings)],
+    ) -> dict:
+        assert_viktor_public_slug(slug, cfg)
+        state = get_system_state(db)
+        state.paper_bot_paused = True
+        db.commit()
+        return {"paused": True, "app": await build_paper_app_state(db, cfg)}
+
+    @app.post("/p/{slug}/api/bot/resume")
+    async def public_bot_resume(
+        slug: str,
+        db: Annotated[Session, Depends(get_db)],
+        cfg: Annotated[Settings, Depends(get_settings)],
+    ) -> dict:
+        assert_viktor_public_slug(slug, cfg)
+        state = get_system_state(db)
+        state.paper_bot_paused = False
+        db.commit()
+        return {"paused": False, "app": await build_paper_app_state(db, cfg)}
+
+    @app.get("/p/{slug}/api/decisions/{decision_id}")
+    async def public_decision(
+        slug: str,
+        decision_id: int,
+        db: Annotated[Session, Depends(get_db)],
+        cfg: Annotated[Settings, Depends(get_settings)],
+    ) -> dict:
+        assert_viktor_public_slug(slug, cfg)
+        detail = get_decision_detail(db, decision_id)
+        if detail is None:
+            raise HTTPException(404, "Decision not found")
+        return detail
+
+    @app.get("/p/{slug}/api/positions/{position_id}")
+    async def public_position(
+        slug: str,
+        position_id: int,
+        db: Annotated[Session, Depends(get_db)],
+        cfg: Annotated[Settings, Depends(get_settings)],
+    ) -> dict:
+        assert_viktor_public_slug(slug, cfg)
+        detail = get_position_detail(db, position_id)
+        if detail is None:
+            raise HTTPException(404, "Position not found")
+        return detail
+
+    @app.get("/p/{slug}/api/lessons/{lesson_id}")
+    async def public_lesson(
+        slug: str,
+        lesson_id: int,
+        db: Annotated[Session, Depends(get_db)],
+        cfg: Annotated[Settings, Depends(get_settings)],
+    ) -> dict:
+        assert_viktor_public_slug(slug, cfg)
+        detail = get_lesson_detail(db, lesson_id)
+        if detail is None:
+            raise HTTPException(404, "Lesson not found")
+        return detail
 
     @app.post("/p/{slug}/refresh")
     async def viktor_public_refresh(
@@ -235,7 +387,7 @@ def create_app() -> FastAPI:
         cfg: Annotated[Settings, Depends(get_settings)],
     ) -> dict:
         assert_viktor_public_slug(slug, cfg)
-        return await run_viktor_refresh(db, cfg)
+        return await run_paper_bot_once(db, cfg)
 
     @app.get("/", response_class=HTMLResponse)
     def dashboard(

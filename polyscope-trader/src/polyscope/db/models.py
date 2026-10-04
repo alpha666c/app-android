@@ -46,6 +46,9 @@ class SystemState(Base):
     last_order_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     live_stream_ok: Mapped[bool] = mapped_column(Boolean, default=False)
     readiness_score: Mapped[int | None] = mapped_column(Integer)
+    paper_bot_last_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    paper_bot_runs: Mapped[int] = mapped_column(Integer, default=0)
+    paper_bot_paused: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class LedgerAccount(Base):
@@ -279,4 +282,49 @@ class PaperModelCall(Base):
     evidence_json: Mapped[str | None] = mapped_column(Text)
     vault_decision_path: Mapped[str | None] = mapped_column(String(512))
     tags_json: Mapped[str | None] = mapped_column(Text)
+    stake_usdc: Mapped[Decimal | None] = mapped_column(Numeric(24, 8))
+    size_shares: Mapped[Decimal | None] = mapped_column(Numeric(24, 8))
+    side: Mapped[str | None] = mapped_column(String(8))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PaperPosition(Base):
+    """Open or resolved simulated paper bet. Never a live order."""
+
+    __tablename__ = "paper_positions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    call_id: Mapped[int] = mapped_column(ForeignKey("paper_model_calls.id"), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="open")
+    side: Mapped[str] = mapped_column(String(8))
+    market_slug: Mapped[str] = mapped_column(String(256), index=True)
+    market_title: Mapped[str] = mapped_column(String(512))
+    market_topic: Mapped[str] = mapped_column(String(128), index=True)
+    condition_id: Mapped[str | None] = mapped_column(String(128))
+    token_id: Mapped[str | None] = mapped_column(String(128))
+    stake_usdc: Mapped[Decimal] = mapped_column(Numeric(24, 8))
+    entry_price: Mapped[Decimal] = mapped_column(Numeric(24, 8))
+    size_shares: Mapped[Decimal] = mapped_column(Numeric(24, 8))
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolution: Mapped[str | None] = mapped_column(String(16))
+    realized_pnl: Mapped[Decimal | None] = mapped_column(Numeric(24, 8))
+    resolved_yes_price: Mapped[Decimal | None] = mapped_column(Numeric(24, 8))
+
+
+class PaperLesson(Base):
+    """Reviewed mistake memory for future paper calls."""
+
+    __tablename__ = "paper_lessons"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    lesson_id: Mapped[str] = mapped_column(String(64), unique=True)
+    market_topic: Mapped[str] = mapped_column(String(128), index=True)
+    market_slug: Mapped[str] = mapped_column(String(256))
+    position_id: Mapped[int | None] = mapped_column(ForeignKey("paper_positions.id"))
+    call_id: Mapped[int | None] = mapped_column(ForeignKey("paper_model_calls.id"))
+    summary: Mapped[str] = mapped_column(Text)
+    validation_status: Mapped[str] = mapped_column(String(32), default="unverified")
+    loss_pnl: Mapped[Decimal | None] = mapped_column(Numeric(24, 8))
+    vault_path: Mapped[str | None] = mapped_column(String(512))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
