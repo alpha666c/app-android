@@ -60,6 +60,8 @@ async def build_paper_app_state(
         except Exception:
             markets = []
     loop_pass_count = session.scalar(select(func.count()).select_from(PaperModelCall)) or 0
+    scoreboard = compute_paper_score(session)
+    open_rows = [p for p in positions if p.status == "open"]
     return {
         "paper_only": True,
         "live_locked": True,
@@ -69,7 +71,9 @@ async def build_paper_app_state(
             "run_count": state.paper_bot_runs or 0,
             "interval_seconds": cfg.paper_bot_interval_seconds,
         },
-        "score": compute_paper_score(session),
+        "scoreboard": scoreboard,
+        "score": scoreboard,
+        "open_bets": [position_to_api(p) for p in open_rows if p],
         "loop_pass_count": loop_pass_count,
         "decisions": decisions,
         "positions": [position_to_api(p) for p in positions if p],

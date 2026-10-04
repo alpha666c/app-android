@@ -47,7 +47,11 @@ def run_migrations(engine: Engine) -> None:
                 ("stake_usdc", "NUMERIC(24,8)"),
                 ("size_shares", "NUMERIC(24,8)"),
                 ("side", "VARCHAR(8)"),
+                ("fee_usdc", "NUMERIC(24,8)"),
             ):
                 if not _has_column(engine, "paper_model_calls", col):
                     conn.execute(text(f"ALTER TABLE paper_model_calls ADD COLUMN {col} {ddl}"))
+        if _has_column(engine, "paper_positions", "id"):
+            if not _has_column(engine, "paper_positions", "fee_usdc"):
+                conn.execute(text("ALTER TABLE paper_positions ADD COLUMN fee_usdc NUMERIC(24,8) DEFAULT 0"))
         conn.commit()

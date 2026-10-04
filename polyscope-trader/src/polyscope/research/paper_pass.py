@@ -10,7 +10,7 @@ from pathlib import Path
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from polyscope.config import Settings, assert_paper_only_for_research, research_ai_skip_reason
+from polyscope.config import Settings, assert_paper_only_for_research
 from polyscope.db.models import PaperModelCall, utcnow
 from polyscope.platform.public_client import PlatformClient
 from polyscope.research.ai.client import ResearchAIClient
@@ -19,6 +19,7 @@ from polyscope.research.evidence import build_market_evidence, evidence_is_thin
 from polyscope.research.markets import fetch_open_markets
 from polyscope.research.paper_lessons import lessons_to_facts, load_lessons_for_topic, market_topic_key
 from polyscope.research.paper_labels import compute_paper_tags_and_labels, tags_payload_json
+from polyscope.research.paper_rules import PROVIDER as DETERMINISTIC_PROVIDER, deterministic_paper_action
 from polyscope.research.vault import (
     _utc_iso,
     write_decision_note,
@@ -79,7 +80,7 @@ async def run_paper_research_pass(
 
     featured = _pick_featured_market(markets, session)
     topic = market_topic_key(featured.get("category"), featured.get("slug", ""))
-    prior_lessons = load_lessons_for_topic(session, topic, limit=5)
+    prior_lessons = load_lessons_for_topic(session, topic, limit=5, as_of=when)
     evidence = build_market_evidence(featured, when)
     write_event_snapshot(
         vault_root,
@@ -154,9 +155,8 @@ async def run_paper_research_pass(
         reason = f"Evidence thin: {thin_reason}"
         provider = "rules_fallback"
     elif not client.available():
-        action = "WAIT"
-        reason = research_ai_skip_reason(settings)
-        provider = "rules_fallback"
+        action, reason = deterministic_paper_action(evidence)
+        provider = DETERMINISTIC_PROVIDER
     else:
         suggestion = await client.suggest_paper_decision(
             {

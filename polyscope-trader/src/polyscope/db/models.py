@@ -284,6 +284,7 @@ class PaperModelCall(Base):
     tags_json: Mapped[str | None] = mapped_column(Text)
     stake_usdc: Mapped[Decimal | None] = mapped_column(Numeric(24, 8))
     size_shares: Mapped[Decimal | None] = mapped_column(Numeric(24, 8))
+    fee_usdc: Mapped[Decimal | None] = mapped_column(Numeric(24, 8))
     side: Mapped[str | None] = mapped_column(String(8))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -292,6 +293,7 @@ class PaperPosition(Base):
     """Open or resolved simulated paper bet. Never a live order."""
 
     __tablename__ = "paper_positions"
+    __table_args__ = (UniqueConstraint("call_id", name="uq_paper_position_call"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     call_id: Mapped[int] = mapped_column(ForeignKey("paper_model_calls.id"), index=True)
@@ -305,6 +307,7 @@ class PaperPosition(Base):
     stake_usdc: Mapped[Decimal] = mapped_column(Numeric(24, 8))
     entry_price: Mapped[Decimal] = mapped_column(Numeric(24, 8))
     size_shares: Mapped[Decimal] = mapped_column(Numeric(24, 8))
+    fee_usdc: Mapped[Decimal] = mapped_column(Numeric(24, 8), default=Decimal("0"))
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resolution: Mapped[str | None] = mapped_column(String(16))

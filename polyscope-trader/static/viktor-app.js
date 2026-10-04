@@ -43,7 +43,7 @@
     }
     root.className = "app";
     const bot = a.bot || {};
-    const score = a.score || {};
+    const score = a.scoreboard || a.score || {};
     const tagButtons = (a.all_tags || [])
       .map(function (t) {
         const active = state.tag === t ? " active" : "";
@@ -56,9 +56,10 @@
       '<div class="badges"><span class="b-paper">PAPER ONLY</span><span class="b-lock">LIVE LOCKED</span></div>' +
       "<h1 style=\"font-size:1.05rem;margin:0.5rem 0 0\">Paper bot</h1>" +
       '<div class="score">' +
-      "<span>Open " + esc(score.open_positions) + "</span>" +
+      "<span>Open " + esc(score.open_bets != null ? score.open_bets : score.open_positions) + "</span>" +
       "<span>W " + esc(score.wins) + "</span>" +
       "<span>L " + esc(score.losses) + "</span>" +
+      (score.pushes != null ? "<span>Push " + esc(score.pushes) + "</span>" : "") +
       "<span>PnL " + esc(score.total_realized_pnl) + "</span>" +
       "</div>" +
       '<div class="toolbar">' +
@@ -97,7 +98,7 @@
   function listForTab(a) {
     let rows = [];
     if (state.tab === "decisions") rows = a.decisions || [];
-    else if (state.tab === "positions") rows = a.positions || [];
+    else if (state.tab === "positions") rows = a.open_bets || a.positions || [];
     else rows = a.lessons || [];
     if (!rows.length) return '<p class="muted" style="padding:0.75rem">Nothing here yet.</p>';
     return rows

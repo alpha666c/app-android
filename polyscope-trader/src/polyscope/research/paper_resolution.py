@@ -75,19 +75,28 @@ async def fetch_market_outcome_prices(
     return None
 
 
-def score_paper_position(side: str, entry_price: Decimal, stake_usdc: Decimal, yes_wins: bool) -> tuple[str, Decimal]:
-    """Return resolution label win|loss and realized pnl in paper USDC."""
+def score_paper_position(
+    side: str,
+    entry_price: Decimal,
+    stake_usdc: Decimal,
+    yes_wins: bool | None,
+    fee_usdc: Decimal | None = None,
+) -> tuple[str, Decimal]:
+    """Return resolution label win|loss|push and realized pnl in paper USDC."""
+    fee = fee_usdc if fee_usdc is not None else Decimal("0")
     side = side.upper()
+    if yes_wins is None:
+        return ("push", Decimal("0"))
+    if entry_price <= 0 or stake_usdc <= 0:
+        return ("push", Decimal("0"))
     if side == "YES":
         won = yes_wins is True
     else:
         won = yes_wins is False
-    if entry_price <= 0 or stake_usdc <= 0:
-        return ("push", Decimal("0"))
     shares = stake_usdc / entry_price
     if won:
         payout = shares * Decimal("1")
-        pnl = payout - stake_usdc
+        pnl = payout - stake_usdc - fee
         return ("win", pnl)
-    pnl = -stake_usdc
+    pnl = -stake_usdc - fee
     return ("loss", pnl)

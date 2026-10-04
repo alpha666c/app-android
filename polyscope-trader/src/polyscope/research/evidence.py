@@ -31,6 +31,7 @@ class MarketEvidence:
             "price_available": self.price_available,
             "spread_flag": self.spread_flag,
             "observed_at": self.observed_at,
+            "category": self.category,
         }
 
 

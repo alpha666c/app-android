@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from polyscope.config import Settings
 from polyscope.db.models import PaperLesson, PaperModelCall, PaperPosition, utcnow
@@ -18,7 +17,7 @@ from polyscope.research.paper_lessons import market_topic_key, record_loss_lesso
 from polyscope.research.markets import enrich_market_tokens
 from polyscope.research.paper_pass import run_paper_research_pass
 from polyscope.research.paper_resolution import fetch_market_outcome_prices, score_paper_position
-from polyscope.research.paper_sizing import compute_paper_stake_and_shares
+from polyscope.research.paper_sizing import compute_paper_bet
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +36,7 @@ def position_to_api(row: PaperPosition | None) -> dict | None:
         "stake_usdc": str(row.stake_usdc),
         "entry_price": str(row.entry_price),
         "size_shares": str(row.size_shares),
+        "fee_usdc": str(row.fee_usdc) if row.fee_usdc is not None else "0",
         "opened_at": row.opened_at.isoformat() if row.opened_at else None,
         "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
         "resolution": row.resolution,
@@ -72,14 +72,19 @@ def compute_paper_score(session: Session) -> dict:
     losses = session.scalar(
         select(func.count()).select_from(PaperPosition).where(PaperPosition.resolution == "loss")
     ) or 0
+    pushes = session.scalar(
+        select(func.count()).select_from(PaperPosition).where(PaperPosition.resolution == "push")
+    ) or 0
     pnl_rows = session.scalars(
         select(PaperPosition.realized_pnl).where(PaperPosition.realized_pnl.is_not(None))
     ).all()
     total_pnl = sum((p or Decimal("0")) for p in pnl_rows)
     return {
         "open_positions": open_n,
+        "open_bets": open_n,
         "wins": wins,
         "losses": losses,
+        "pushes": pushes,
         "total_realized_pnl": str(total_pnl),
     }
 
@@ -98,14 +103,21 @@ async def resolve_open_paper_positions(
     vault_root = Path(settings.vault_dir)
     for pos in open_rows:
         snap = await fetch_market_outcome_prices(platform, pos.condition_id)
-        if snap is None or not snap.resolved or snap.yes_wins is None:
+        if snap is None:
             continue
-        label, pnl = score_paper_position(
-            pos.side,
-            pos.entry_price,
-            pos.stake_usdc,
-            snap.yes_wins,
-        )
+        fee = pos.fee_usdc or Decimal("0")
+        if snap.resolved and snap.yes_wins is not None:
+            label, pnl = score_paper_position(
+                pos.side,
+                pos.entry_price,
+                pos.stake_usdc,
+                snap.yes_wins,
+                fee,
+            )
+        elif snap.closed and not snap.resolved:
+            label, pnl = ("push", Decimal("0"))
+        else:
+            continue
         pos.status = "resolved"
         pos.resolved_at = utcnow()
         pos.resolution = label
@@ -129,6 +141,9 @@ def open_paper_position_from_call(
     action = (call.call or "").upper()
     if action not in ("BUY", "SELL"):
         return None
+    existing = session.scalar(select(PaperPosition).where(PaperPosition.call_id == call.id))
+    if existing is not None:
+        return existing
     yes_price_raw = featured.get("yes_buy_price")
     no_price_raw = featured.get("no_buy_price")
     try:
@@ -146,10 +161,9 @@ def open_paper_position_from_call(
         except Exception:
             entry = Decimal("1") - yes_p if yes_p else Decimal("0")
         token_id = featured.get("no_token_id")
-    if entry <= 0:
-        return None
-    stake, shares = compute_paper_stake_and_shares(settings, entry)
-    if shares <= 0:
+    category = featured.get("category") or featured.get("market_category")
+    bet = compute_paper_bet(settings, entry, category)
+    if bet is None:
         return None
     topic = market_topic_key(featured.get("category"), featured.get("slug") or call.market_slug)
     pos = PaperPosition(
@@ -161,13 +175,15 @@ def open_paper_position_from_call(
         market_topic=topic,
         condition_id=call.condition_id,
         token_id=str(token_id) if token_id else None,
-        stake_usdc=stake,
-        entry_price=entry,
-        size_shares=shares,
+        stake_usdc=bet.stake_usdc,
+        entry_price=bet.entry_price,
+        size_shares=bet.size_shares,
+        fee_usdc=bet.fee_usdc,
         opened_at=utcnow(),
     )
-    call.stake_usdc = stake
-    call.size_shares = shares
+    call.stake_usdc = bet.stake_usdc
+    call.size_shares = bet.size_shares
+    call.fee_usdc = bet.fee_usdc
     call.side = side
     session.add(pos)
     session.flush()
@@ -196,6 +212,7 @@ async def run_paper_bot_tick(
             items = payload.get("items") or []
             if items:
                 featured["yes_buy_price"] = items[0].get("yes_buy_price")
+                featured["category"] = items[0].get("category") or featured["category"]
         except json.JSONDecodeError:
             pass
     await enrich_market_tokens(platform, featured, call.condition_id)
@@ -208,4 +225,5 @@ async def run_paper_bot_tick(
         "call": paper_call_to_api(call),
         "position": position_to_api(position),
         "score": compute_paper_score(session),
+        "scoreboard": compute_paper_score(session),
     }

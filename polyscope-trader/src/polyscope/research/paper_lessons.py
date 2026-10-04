@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from datetime import datetime
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -23,13 +25,16 @@ def market_topic_key(category: str | None, market_slug: str) -> str:
     return (market_slug or "unknown")[:48].lower()
 
 
-def load_lessons_for_topic(session: Session, topic: str, limit: int = 5) -> list[PaperLesson]:
-    return session.scalars(
-        select(PaperLesson)
-        .where(PaperLesson.market_topic == topic)
-        .order_by(PaperLesson.id.desc())
-        .limit(limit)
-    ).all()
+def load_lessons_for_topic(
+    session: Session,
+    topic: str,
+    limit: int = 5,
+    as_of: datetime | None = None,
+) -> list[PaperLesson]:
+    stmt = select(PaperLesson).where(PaperLesson.market_topic == topic)
+    if as_of is not None:
+        stmt = stmt.where(PaperLesson.created_at < as_of)
+    return session.scalars(stmt.order_by(PaperLesson.id.desc()).limit(limit)).all()
 
 
 def lessons_to_facts(lessons: list[PaperLesson]) -> list[dict]:
@@ -50,7 +55,12 @@ def record_loss_lesson(
     position: PaperPosition,
     call: PaperModelCall | None,
     realized_pnl: Decimal,
-) -> PaperLesson:
+) -> PaperLesson | None:
+    existing = session.scalar(
+        select(PaperLesson).where(PaperLesson.position_id == position.id)
+    )
+    if existing is not None:
+        return existing
     ensure_vault_layout(vault_root)
     lesson_id = f"lesson-{position.id:05d}"
     reason = call.reason if call else "No linked call."

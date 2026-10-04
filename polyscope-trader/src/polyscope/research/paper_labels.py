@@ -44,7 +44,10 @@ def compute_paper_tags_and_labels(
         tags.append("has-evidence")
         labels.append("Evidence on file")
 
-    if provider and provider != "rules_fallback":
+    if provider == "deterministic_rule":
+        tags.append("not-a-model")
+        labels.append("Not a model call")
+    elif provider and provider != "rules_fallback":
         tags.append(f"provider-{provider}")
         labels.append(f"Provider {provider}")
 
