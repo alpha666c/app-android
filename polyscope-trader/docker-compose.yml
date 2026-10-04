@@ -1,0 +1,21 @@
+services:
+  api:
+    build: .
+    command: polyscope-api
+    env_file: .env
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - polyscope-data:/data
+    depends_on:
+      - worker
+
+  worker:
+    build: .
+    command: polyscope-worker
+    env_file: .env
+    volumes:
+      - polyscope-data:/data
+
+volumes:
+  polyscope-data:

@@ -1,0 +1,64 @@
+"""Lightweight SQLite migrations for new columns."""
+
+from __future__ import annotations
+
+from sqlalchemy import inspect, text
+from sqlalchemy.engine import Engine
+
+
+def _has_column(engine: Engine, table: str, column: str) -> bool:
+    insp = inspect(engine)
+    cols = {c["name"] for c in insp.get_columns(table)}
+    return column in cols
+
+
+def run_migrations(engine: Engine) -> None:
+    with engine.connect() as conn:
+        if _has_column(engine, "system_state", "id"):
+            for col, ddl in (
+                ("automation_tier", "INTEGER DEFAULT 1"),
+                ("last_order_heartbeat_at", "TIMESTAMP"),
+                ("live_stream_ok", "BOOLEAN DEFAULT 0"),
+                ("readiness_score", "INTEGER"),
+                ("paper_bot_last_at", "TIMESTAMP"),
+                ("paper_bot_runs", "INTEGER DEFAULT 0"),
+                ("paper_bot_paused", "BOOLEAN DEFAULT 0"),
+            ):
+                if not _has_column(engine, "system_state", col):
+                    conn.execute(text(f"ALTER TABLE system_state ADD COLUMN {col} {ddl}"))
+        if _has_column(engine, "signals", "id"):
+            for col, ddl in (
+                ("best_bid_at_signal", "NUMERIC(24,8)"),
+                ("best_ask_at_signal", "NUMERIC(24,8)"),
+                ("spread_at_signal", "NUMERIC(24,8)"),
+                ("market_category", "VARCHAR(64)"),
+                ("consensus_wallet_count", "INTEGER DEFAULT 1"),
+                ("devils_advocate", "TEXT"),
+            ):
+                if not _has_column(engine, "signals", col):
+                    conn.execute(text(f"ALTER TABLE signals ADD COLUMN {col} {ddl}"))
+        if _has_column(engine, "paper_model_calls", "id"):
+            for col, ddl in (
+                ("hypothesis_id", "VARCHAR(64)"),
+                ("decision_id", "VARCHAR(64)"),
+                ("evidence_json", "TEXT"),
+                ("vault_decision_path", "VARCHAR(512)"),
+                ("tags_json", "TEXT"),
+                ("stake_usdc", "NUMERIC(24,8)"),
+                ("size_shares", "NUMERIC(24,8)"),
+                ("side", "VARCHAR(8)"),
+                ("fee_usdc", "NUMERIC(24,8)"),
+            ):
+                if not _has_column(engine, "paper_model_calls", col):
+                    conn.execute(text(f"ALTER TABLE paper_model_calls ADD COLUMN {col} {ddl}"))
+        if _has_column(engine, "paper_positions", "id"):
+            if not _has_column(engine, "paper_positions", "fee_usdc"):
+                conn.execute(text("ALTER TABLE paper_positions ADD COLUMN fee_usdc NUMERIC(24,8) DEFAULT 0"))
+        if _has_column(engine, "paper_lessons", "id"):
+            for col, ddl in (
+                ("resolution_outcome", "VARCHAR(16)"),
+                ("training_json", "TEXT"),
+            ):
+                if not _has_column(engine, "paper_lessons", col):
+                    conn.execute(text(f"ALTER TABLE paper_lessons ADD COLUMN {col} {ddl}"))
+        conn.commit()

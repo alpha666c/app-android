@@ -1,0 +1,9 @@
+# Secrets — never commit .env
+.env
+*.db
+__pycache__/
+.pytest_cache/
+.venv/
+*.egg-info/
+evidence/smoke_*.json
+polyscope-trader/data/

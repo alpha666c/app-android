@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PolyScope Paper App</title>
+  <link rel="stylesheet" href="/static/viktor-app.css" />
+</head>
+<body>
+  <div id="root" class="boot">Starting paper app...</div>
+  <script>window.VIKTOR_API_BASE = {{ api_base | tojson }};</script>
+  <script src="/static/viktor-app.js"></script>
+</body>
+</html>
