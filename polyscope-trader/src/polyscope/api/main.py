@@ -51,6 +51,7 @@ from polyscope.api.paper_app import (
     get_position_detail,
 )
 from polyscope.research.paper_bot import run_paper_bot_tick
+from polyscope.research.paper_lessons import backfill_training_lessons
 
 logger = logging.getLogger(__name__)
 security = HTTPBasic()
@@ -179,6 +180,14 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     async def start_paper_bot_loop() -> None:
         if cfg_snapshot.trading_mode == TradingMode.PAPER:
+            try:
+                with SessionLocal() as db:
+                    n = await backfill_training_lessons(db, cfg_snapshot, use_ai=False)
+                    if n:
+                        db.commit()
+                        logger.info("Backfilled %s paper training lessons", n)
+            except Exception:
+                logger.exception("paper training lesson backfill failed")
             asyncio.create_task(_paper_bot_background_loop(SessionLocal, cfg_snapshot))
 
     @app.get("/viktor", response_class=HTMLResponse)

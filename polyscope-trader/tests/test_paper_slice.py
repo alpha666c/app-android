@@ -269,6 +269,62 @@ def test_deterministic_rule_not_model_label():
     assert "Not a model call" in labels
 
 
+def test_backfill_training_lessons_for_resolved_wins(paper_db, tmp_path, monkeypatch):
+    import asyncio
+
+    from polyscope.config import load_settings
+    from polyscope.research.paper_lessons import backfill_training_lessons
+
+    vault = tmp_path / "vault-backfill"
+    monkeypatch.setenv("VAULT_DIR", str(vault))
+    cfg = load_settings()
+
+    async def run() -> int:
+        with paper_db() as session:
+            call = PaperModelCall(
+                market_slug="resolved-win",
+                market_title="Resolved win?",
+                call="BUY",
+                reason="Test belief.",
+                provider="deterministic_rule",
+                mode="paper",
+                evidence_json='{"evidence_ids":["e1"],"items":[{"id":"e1","yes_buy_price":"0.6"}]}',
+            )
+            session.add(call)
+            session.flush()
+            pos = PaperPosition(
+                call_id=call.id,
+                status="resolved",
+                side="YES",
+                market_slug="resolved-win",
+                market_title="Resolved win?",
+                market_topic="resolved",
+                stake_usdc=Decimal("1"),
+                entry_price=Decimal("0.5"),
+                size_shares=Decimal("2"),
+                fee_usdc=Decimal("0"),
+                resolution="win",
+                realized_pnl=Decimal("0.5"),
+                resolved_yes_price=Decimal("0.99"),
+            )
+            session.add(pos)
+            session.commit()
+            n = await backfill_training_lessons(session, cfg, use_ai=False)
+            session.commit()
+            return n
+
+    created = asyncio.run(run())
+    assert created == 1
+    with paper_db() as session:
+        from sqlalchemy import select
+
+        from polyscope.db.models import PaperLesson
+
+        les = session.scalars(select(PaperLesson)).all()
+        assert len(les) == 1
+        assert les[0].resolution_outcome == "win"
+
+
 def test_app_payload_has_scoreboard_and_open_bets(monkeypatch, tmp_path):
     from polyscope.api import main as api_main
     from fastapi.testclient import TestClient

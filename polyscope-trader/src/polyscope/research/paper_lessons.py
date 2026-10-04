@@ -204,6 +204,8 @@ async def record_training_lesson(
     realized_pnl: Decimal,
     resolved_yes_price: Decimal | None,
     yes_wins: bool | None,
+    *,
+    use_ai: bool = True,
 ) -> PaperLesson | None:
     if resolution not in ("win", "loss"):
         return None
@@ -217,7 +219,7 @@ async def record_training_lesson(
     from polyscope.research.ai.client import ResearchAIClient
 
     client = ResearchAIClient(settings)
-    if client.available():
+    if use_ai and client.available():
         facts = {
             "resolution": resolution,
             "market_title": position.market_title,
@@ -279,3 +281,62 @@ async def record_training_lesson(
     session.add(row)
     session.flush()
     return row
+
+
+def infer_yes_wins_from_position(position: PaperPosition) -> bool | None:
+    """Derive market YES outcome from stored resolution fields only."""
+    if position.resolved_yes_price is not None:
+        if position.resolved_yes_price >= Decimal("0.95"):
+            return True
+        if position.resolved_yes_price <= Decimal("0.05"):
+            return False
+    resolution = (position.resolution or "").lower()
+    side = (position.side or "").upper()
+    if resolution == "win":
+        return side == "YES"
+    if resolution == "loss":
+        return side == "NO"
+    return None
+
+
+async def backfill_training_lessons(
+    session: Session,
+    settings: Settings,
+    *,
+    use_ai: bool = False,
+) -> int:
+    """Create training lessons for resolved wins/losses that have none yet."""
+    vault_root = Path(settings.vault_dir)
+    lesson_position_ids = set(
+        session.scalars(select(PaperLesson.position_id).where(PaperLesson.position_id.is_not(None))).all()
+    )
+    rows = session.scalars(
+        select(PaperPosition).where(
+            PaperPosition.status == "resolved",
+            PaperPosition.resolution.in_(("win", "loss")),
+        )
+    ).all()
+    created = 0
+    for pos in rows:
+        if pos.id in lesson_position_ids:
+            continue
+        call = session.get(PaperModelCall, pos.call_id)
+        resolution = str(pos.resolution)
+        pnl = pos.realized_pnl if pos.realized_pnl is not None else Decimal("0")
+        yes_wins = infer_yes_wins_from_position(pos)
+        row = await record_training_lesson(
+            session,
+            settings,
+            vault_root,
+            pos,
+            call,
+            resolution,
+            pnl,
+            pos.resolved_yes_price,
+            yes_wins,
+            use_ai=use_ai,
+        )
+        if row is not None:
+            created += 1
+            lesson_position_ids.add(pos.id)
+    return created
