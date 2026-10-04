@@ -329,5 +329,7 @@ class PaperLesson(Base):
     summary: Mapped[str] = mapped_column(Text)
     validation_status: Mapped[str] = mapped_column(String(32), default="unverified")
     loss_pnl: Mapped[Decimal | None] = mapped_column(Numeric(24, 8))
+    resolution_outcome: Mapped[str | None] = mapped_column(String(16))
+    training_json: Mapped[str | None] = mapped_column(Text)
     vault_path: Mapped[str | None] = mapped_column(String(512))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

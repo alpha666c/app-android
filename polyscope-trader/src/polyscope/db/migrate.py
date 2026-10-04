@@ -54,4 +54,11 @@ def run_migrations(engine: Engine) -> None:
         if _has_column(engine, "paper_positions", "id"):
             if not _has_column(engine, "paper_positions", "fee_usdc"):
                 conn.execute(text("ALTER TABLE paper_positions ADD COLUMN fee_usdc NUMERIC(24,8) DEFAULT 0"))
+        if _has_column(engine, "paper_lessons", "id"):
+            for col, ddl in (
+                ("resolution_outcome", "VARCHAR(16)"),
+                ("training_json", "TEXT"),
+            ):
+                if not _has_column(engine, "paper_lessons", col):
+                    conn.execute(text(f"ALTER TABLE paper_lessons ADD COLUMN {col} {ddl}"))
         conn.commit()

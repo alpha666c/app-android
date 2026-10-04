@@ -23,4 +23,7 @@ def deterministic_paper_action(evidence: MarketEvidence) -> tuple[str, str]:
             "SELL",
             "Deterministic paper rule: YES price below band. Stake sized in code. Not a model call.",
         )
-    return "WAIT", "Deterministic paper rule: mid band abstain. Not a model call."
+    return "WAIT", (
+        "Deterministic paper rule: mid band abstain. Not a model call. "
+        "Set OPENROUTER_API_KEY on the server for a model suggestion."
+    )

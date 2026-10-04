@@ -74,6 +74,7 @@ def test_tier_observe_blocks_auto():
         use_stream_ingest=False,
         ai_provider="none",
         ai_gateway_api_key=None,
+        ai_api_base="https://api.openai.com/v1",
         ai_model="gpt-4o-mini",
         live_scaled_unlocked=False,
         micro_max_order_cost=None,

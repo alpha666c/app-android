@@ -5,15 +5,17 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
+import json
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from polyscope.config import Settings
 from polyscope.db.models import PaperLesson, PaperModelCall, PaperPosition, utcnow
 from polyscope.db.session import get_system_state
 from polyscope.platform.public_client import PlatformClient
 from polyscope.research.paper_labels import paper_call_to_api
-from polyscope.research.paper_lessons import market_topic_key, record_loss_lesson
+from polyscope.research.paper_lessons import market_topic_key, record_training_lesson
 from polyscope.research.markets import enrich_market_tokens
 from polyscope.research.paper_pass import run_paper_research_pass
 from polyscope.research.paper_resolution import fetch_market_outcome_prices, score_paper_position
@@ -45,19 +47,27 @@ def position_to_api(row: PaperPosition | None) -> dict | None:
 
 
 def lesson_to_api(row: PaperLesson) -> dict:
-    return {
+    out = {
         "id": row.id,
         "lesson_id": row.lesson_id,
         "market_topic": row.market_topic,
         "market_slug": row.market_slug,
         "summary": row.summary,
         "validation_status": row.validation_status,
+        "realized_pnl": str(row.loss_pnl) if row.loss_pnl is not None else None,
         "loss_pnl": str(row.loss_pnl) if row.loss_pnl is not None else None,
+        "resolution_outcome": row.resolution_outcome,
         "vault_path": row.vault_path,
         "position_id": row.position_id,
         "call_id": row.call_id,
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }
+    if row.training_json:
+        try:
+            out["training"] = json.loads(row.training_json)
+        except json.JSONDecodeError:
+            pass
+    return out
 
 
 def compute_paper_score(session: Session) -> dict:
@@ -126,8 +136,19 @@ async def resolve_open_paper_positions(
         call = session.get(PaperModelCall, pos.call_id)
         if call:
             call.outcome = label
-        if label == "loss":
-            record_loss_lesson(session, vault_root, pos, call, pnl)
+        if label in ("win", "loss"):
+            yes_wins = snap.yes_wins if snap.resolved else None
+            await record_training_lesson(
+                session,
+                settings,
+                vault_root,
+                pos,
+                call,
+                label,
+                pnl,
+                snap.yes_price,
+                yes_wins,
+            )
         resolved += 1
     return resolved
 

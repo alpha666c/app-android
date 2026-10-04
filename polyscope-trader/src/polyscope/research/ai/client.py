@@ -12,6 +12,8 @@ from polyscope.config import Settings, research_ai_skip_reason
 
 logger = logging.getLogger(__name__)
 
+PAPER_DECISION_PROVIDERS = frozenset({"openai_compatible", "openrouter"})
+
 
 @dataclass
 class BriefOutput:
@@ -41,9 +43,25 @@ class ResearchAIClient:
 
     def available(self) -> bool:
         return (
-            self.settings.ai_provider != "none"
+            self.settings.ai_provider not in ("none", "")
             and self.settings.ai_gateway_api_key is not None
         )
+
+    def _chat_completions_url(self) -> str:
+        return f"{self.settings.ai_api_base.rstrip('/')}/chat/completions"
+
+    def _request_headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.settings.ai_gateway_api_key}",
+            "Content-Type": "application/json",
+        }
+
+    def _provider_label(self) -> str:
+        if self.settings.ai_provider == "openrouter":
+            return "openrouter"
+        if self.settings.ai_provider == "openai_compatible":
+            return "openai_compatible"
+        return self.settings.ai_provider
 
     async def synthesize(self, topic: str, facts: dict) -> BriefOutput | None:
         if not self.available():
@@ -54,41 +72,18 @@ class ResearchAIClient:
             "Do NOT recommend trades or sizes. Facts:\n"
             + json.dumps(facts, default=str)
         )
-        if self.settings.ai_provider == "openai_compatible":
-            return await self._openai_chat(topic, prompt)
+        if self.settings.ai_provider in PAPER_DECISION_PROVIDERS:
+            parsed = await self._chat_json(prompt)
+            if parsed:
+                return BriefOutput(
+                    thesis=str(parsed.get("thesis", topic)),
+                    uncertainties=list(parsed.get("uncertainties", [])),
+                    data_gaps=list(parsed.get("data_gaps", [])),
+                    cautions=list(parsed.get("cautions", [])),
+                )
         if self.settings.ai_provider == "anthropic":
             return await self._anthropic(topic, prompt)
         return None
-
-    async def _openai_chat(self, topic: str, prompt: str) -> BriefOutput | None:
-        url = "https://api.openai.com/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.settings.ai_gateway_api_key}",
-            "Content-Type": "application/json",
-        }
-        body = {
-            "model": self.settings.ai_model,
-            "messages": [
-                {"role": "system", "content": "Respond with JSON only."},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.2,
-        }
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as http:
-                resp = await http.post(url, headers=headers, json=body)
-                resp.raise_for_status()
-                content = resp.json()["choices"][0]["message"]["content"]
-                data = json.loads(content)
-                return BriefOutput(
-                    thesis=str(data.get("thesis", topic)),
-                    uncertainties=list(data.get("uncertainties", [])),
-                    data_gaps=list(data.get("data_gaps", [])),
-                    cautions=list(data.get("cautions", [])),
-                )
-        except Exception as exc:
-            logger.warning("AI research call failed: %s", exc)
-            return None
 
     async def _anthropic(self, topic: str, prompt: str) -> BriefOutput | None:
         logger.info("anthropic provider not fully configured; skip")
@@ -97,7 +92,7 @@ class ResearchAIClient:
     def provider_display_name(self) -> str:
         if self.settings.ai_provider == "none" or not self.settings.ai_gateway_api_key:
             return "rules_fallback"
-        return self.settings.ai_provider
+        return self._provider_label()
 
     async def suggest_paper_call(self, market_facts: dict) -> PaperCallOutput:
         """Legacy wrapper; prefer suggest_paper_decision."""
@@ -122,8 +117,8 @@ class ResearchAIClient:
             "Use only the facts provided. Market facts:\n"
             + json.dumps(market_facts, default=str)
         )
-        if self.settings.ai_provider == "openai_compatible":
-            parsed = await self._openai_json(prompt)
+        if self.settings.ai_provider in PAPER_DECISION_PROVIDERS:
+            parsed = await self._chat_json(prompt)
             if parsed:
                 action = str(parsed.get("action", parsed.get("call", "WAIT"))).upper()
                 allowed = ("BUY", "SELL", "WAIT", "REJECT", "BUY_YES", "BUY_NO", "SKIP")
@@ -132,7 +127,7 @@ class ResearchAIClient:
                 return PaperDecisionOutput(
                     action=action,
                     reason=str(parsed.get("reason", "No reason returned.")),
-                    provider="openai_compatible",
+                    provider=self._provider_label(),
                 )
             return PaperDecisionOutput(
                 action="WAIT",
@@ -145,12 +140,27 @@ class ResearchAIClient:
             provider=self.provider_display_name(),
         )
 
-    async def _openai_json(self, prompt: str) -> dict | None:
-        url = "https://api.openai.com/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.settings.ai_gateway_api_key}",
-            "Content-Type": "application/json",
-        }
+    async def suggest_training_next_step(self, facts: dict) -> str | None:
+        """One line: what to do differently next time. Facts only, no invented prices."""
+        if not self.available():
+            return None
+        prompt = (
+            "You write training notes for a paper-only prediction market bot. "
+            "Output ONLY JSON with key: next_step. "
+            "next_step is one or two short sentences on what to do differently next time. "
+            "Use ONLY the facts provided. Do NOT invent prices, outcomes, or PnL. "
+            "Facts:\n"
+            + json.dumps(facts, default=str)
+        )
+        parsed = await self._chat_json(prompt)
+        if not parsed:
+            return None
+        raw = parsed.get("next_step") or parsed.get("lesson")
+        if raw is None:
+            return None
+        return str(raw).strip()[:500]
+
+    async def _chat_json(self, prompt: str) -> dict | None:
         body = {
             "model": self.settings.ai_model,
             "messages": [
@@ -161,10 +171,14 @@ class ResearchAIClient:
         }
         try:
             async with httpx.AsyncClient(timeout=60.0) as http:
-                resp = await http.post(url, headers=headers, json=body)
+                resp = await http.post(
+                    self._chat_completions_url(),
+                    headers=self._request_headers(),
+                    json=body,
+                )
                 resp.raise_for_status()
                 content = resp.json()["choices"][0]["message"]["content"]
                 return json.loads(content)
         except Exception as exc:
-            logger.warning("paper call AI failed: %s", exc)
+            logger.warning("AI research call failed: %s", type(exc).__name__)
             return None

@@ -113,11 +113,13 @@ def test_research_skip_lists_missing_env(monkeypatch):
 
     monkeypatch.delenv("AI_GATEWAY_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.setenv("AI_PROVIDER", "none")
     monkeypatch.setenv("TRADING_MODE", "paper")
     monkeypatch.setenv("DASHBOARD_PASSWORD", "secret")
     cfg = load_settings()
     reason = research_ai_skip_reason(cfg)
+    assert "OPENROUTER_API_KEY" in reason
     assert "AI_GATEWAY_API_KEY" in reason
     assert "OPENAI_API_KEY" in reason
     assert "AI_PROVIDER" in reason

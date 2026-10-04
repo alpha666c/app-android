@@ -80,6 +80,7 @@ class Settings:
     use_stream_ingest: bool
     ai_provider: str
     ai_gateway_api_key: str | None
+    ai_api_base: str
     ai_model: str
     live_scaled_unlocked: bool
     micro_max_order_cost: Decimal | None
@@ -220,7 +221,8 @@ def load_settings() -> Settings:
         in ("1", "true", "yes"),
         ai_provider=_resolve_ai_provider(),
         ai_gateway_api_key=_resolve_ai_gateway_key(),
-        ai_model=os.environ.get("AI_MODEL", "gpt-4o-mini"),
+        ai_api_base=_resolve_ai_api_base(),
+        ai_model=_resolve_ai_model(),
         live_scaled_unlocked=os.environ.get("LIVE_SCALED_UNLOCKED", "false").lower()
         in ("1", "true", "yes"),
         micro_max_order_cost=micro_max,
@@ -236,12 +238,37 @@ def load_settings() -> Settings:
     )
 
 
+OPENROUTER_DEFAULT_FREE_MODEL = "google/gemma-2-9b-it:free"
+
+
 def _resolve_ai_gateway_key() -> str | None:
-    return os.environ.get("AI_GATEWAY_API_KEY") or os.environ.get("OPENAI_API_KEY") or None
+    return (
+        os.environ.get("OPENROUTER_API_KEY")
+        or os.environ.get("AI_GATEWAY_API_KEY")
+        or os.environ.get("OPENAI_API_KEY")
+        or None
+    )
+
+
+def _resolve_ai_api_base() -> str:
+    if os.environ.get("OPENROUTER_API_KEY"):
+        return (os.environ.get("OPENROUTER_API_BASE") or "https://openrouter.ai/api/v1").rstrip("/")
+    custom = os.environ.get("AI_API_BASE")
+    if custom:
+        return custom.rstrip("/")
+    return "https://api.openai.com/v1"
+
+
+def _resolve_ai_model() -> str:
+    if os.environ.get("OPENROUTER_API_KEY"):
+        return os.environ.get("AI_MODEL", OPENROUTER_DEFAULT_FREE_MODEL)
+    return os.environ.get("AI_MODEL", "gpt-4o-mini")
 
 
 def _resolve_ai_provider() -> str:
     raw = (os.environ.get("AI_PROVIDER") or "none").strip().lower()
+    if os.environ.get("OPENROUTER_API_KEY") and raw in ("", "none"):
+        return "openrouter"
     if raw in ("", "none") and _resolve_ai_gateway_key():
         return "openai_compatible"
     return raw or "none"
@@ -252,6 +279,8 @@ def research_ai_missing_env_vars(settings: Settings) -> list[str]:
     if settings.ai_provider != "none" and settings.ai_gateway_api_key:
         return []
     missing: list[str] = []
+    if not os.environ.get("OPENROUTER_API_KEY"):
+        missing.append("OPENROUTER_API_KEY")
     if not os.environ.get("AI_GATEWAY_API_KEY"):
         missing.append("AI_GATEWAY_API_KEY")
     if not os.environ.get("OPENAI_API_KEY"):

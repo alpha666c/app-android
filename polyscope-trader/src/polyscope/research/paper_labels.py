@@ -47,6 +47,9 @@ def compute_paper_tags_and_labels(
     if provider == "deterministic_rule":
         tags.append("not-a-model")
         labels.append("Not a model call")
+    elif provider == "openrouter":
+        tags.append("openrouter")
+        labels.append("OpenRouter model")
     elif provider and provider != "rules_fallback":
         tags.append(f"provider-{provider}")
         labels.append(f"Provider {provider}")

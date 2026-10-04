@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import json
 
 import pytest
 
@@ -11,7 +12,7 @@ from polyscope.config import load_settings
 from polyscope.db.models import PaperLesson, PaperModelCall, PaperPosition
 from polyscope.research.paper_bot import open_paper_position_from_call
 from polyscope.research.paper_labels import compute_paper_tags_and_labels
-from polyscope.research.paper_lessons import load_lessons_for_topic, record_loss_lesson
+from polyscope.research.paper_lessons import load_lessons_for_topic, record_training_lesson
 from polyscope.research.paper_resolution import score_paper_position
 from polyscope.research.paper_rules import deterministic_paper_action
 from polyscope.research.paper_sizing import compute_paper_bet
@@ -148,38 +149,105 @@ def test_lessons_as_of_excludes_future(paper_db, tmp_path):
 
 
 def test_loss_lesson_idempotent(paper_db, tmp_path):
+    import asyncio
+
+    from polyscope.config import load_settings
+
     vault = tmp_path / "vault2"
     vault.mkdir()
-    with paper_db() as session:
-        call = PaperModelCall(
-            market_slug="m-loss",
-            market_title="Loss?",
-            call="BUY",
-            reason="r",
-            provider="x",
-            mode="paper",
-        )
-        session.add(call)
-        session.flush()
-        pos = PaperPosition(
-            call_id=call.id,
-            status="resolved",
-            side="YES",
-            market_slug="m-loss",
-            market_title="Loss?",
-            market_topic="politics",
-            stake_usdc=Decimal("1"),
-            entry_price=Decimal("0.5"),
-            size_shares=Decimal("2"),
-            fee_usdc=Decimal("0.01"),
-        )
-        session.add(pos)
-        session.flush()
-        l1 = record_loss_lesson(session, vault, pos, call, Decimal("-1"))
-        l2 = record_loss_lesson(session, vault, pos, call, Decimal("-1"))
-        assert l1 is not None
-        assert l2 is not None
-        assert l1.id == l2.id
+    cfg = load_settings()
+
+    async def run() -> None:
+        with paper_db() as session:
+            call = PaperModelCall(
+                market_slug="m-loss",
+                market_title="Loss?",
+                call="BUY",
+                reason="Paper BUY because YES price was above the band.",
+                provider="deterministic_rule",
+                mode="paper",
+                evidence_json='{"evidence_ids":["e1"],"items":[{"id":"e1","yes_buy_price":"0.60"}]}',
+            )
+            session.add(call)
+            session.flush()
+            pos = PaperPosition(
+                call_id=call.id,
+                status="resolved",
+                side="YES",
+                market_slug="m-loss",
+                market_title="Loss?",
+                market_topic="politics",
+                stake_usdc=Decimal("1"),
+                entry_price=Decimal("0.5"),
+                size_shares=Decimal("2"),
+                fee_usdc=Decimal("0.01"),
+                resolution="loss",
+            )
+            session.add(pos)
+            session.flush()
+            l1 = await record_training_lesson(
+                session, cfg, vault, pos, call, "loss", Decimal("-1.01"), Decimal("0.05"), False
+            )
+            l2 = await record_training_lesson(
+                session, cfg, vault, pos, call, "loss", Decimal("-1.01"), Decimal("0.05"), False
+            )
+            assert l1 is not None
+            assert l2 is not None
+            assert l1.id == l2.id
+            training = json.loads(l1.training_json or "{}")
+            assert training.get("instruction")
+            assert training.get("context")
+            assert training.get("outcome")
+            assert training.get("lesson")
+
+    asyncio.run(run())
+
+
+def test_training_record_win_facts():
+    from polyscope.research.paper_lessons import build_training_record
+
+    call = PaperModelCall(
+        market_slug="m-win",
+        market_title="Win market?",
+        call="SELL",
+        reason="YES looked too high.",
+        provider="deterministic_rule",
+        mode="paper",
+    )
+    pos = PaperPosition(
+        call_id=1,
+        status="resolved",
+        side="NO",
+        market_slug="m-win",
+        market_title="Win market?",
+        market_topic="politics",
+        stake_usdc=Decimal("1"),
+        entry_price=Decimal("0.4"),
+        size_shares=Decimal("2.5"),
+        fee_usdc=Decimal("0"),
+    )
+    record = build_training_record(
+        pos, call, "win", Decimal("0.5"), Decimal("0.05"), False, "Check spreads before entry."
+    )
+    assert "Instruction" not in record["instruction"]  # plain text
+    assert "Win market?" in record["context"]
+    assert "win" in record["outcome"].lower()
+    assert record["lesson"] == "Check spreads before entry."
+
+
+def test_openrouter_key_selects_base_and_provider(monkeypatch):
+    monkeypatch.setenv("TRADING_MODE", "paper")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "secret")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-redacted")
+    monkeypatch.delenv("AI_GATEWAY_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    cfg = load_settings()
+    assert cfg.ai_provider == "openrouter"
+    assert cfg.ai_api_base == "https://openrouter.ai/api/v1"
+    assert cfg.ai_gateway_api_key == "sk-or-test-redacted"
+    from polyscope.research.ai.client import ResearchAIClient
+
+    assert ResearchAIClient(cfg).available() is True
 
 
 def test_score_applies_fee():
