@@ -17,6 +17,7 @@ from polyscope.research.ai.client import ResearchAIClient
 from polyscope.research.challenger import challenge_proposal, normalize_action
 from polyscope.research.evidence import build_market_evidence, evidence_is_thin
 from polyscope.research.markets import fetch_open_markets
+from polyscope.research.paper_labels import compute_paper_tags_and_labels, tags_payload_json
 from polyscope.research.vault import (
     _utc_iso,
     write_decision_note,
@@ -34,6 +35,18 @@ def _next_ids(session: Session, when: datetime) -> tuple[str, str]:
     seq = count + 1
     stamp = when.strftime("%Y%m%d")
     return f"hypothesis-{stamp}-{seq:04d}", f"decision-{stamp}-{seq:04d}"
+
+
+def _pick_featured_market(markets: list[dict], session: Session) -> dict:
+    if not markets:
+        return {}
+    prior = session.scalar(select(func.count()).select_from(PaperModelCall)) or 0
+    return markets[prior % len(markets)]
+
+
+def _attach_tags(row: PaperModelCall, action: str, provider: str, reason: str, has_evidence: bool) -> None:
+    tags, labels = compute_paper_tags_and_labels(action, provider, reason, has_evidence)
+    row.tags_json = tags_payload_json(tags, labels)
 
 
 async def run_paper_research_pass(
@@ -63,7 +76,7 @@ async def run_paper_research_pass(
             provider="rules_fallback",
         )
 
-    featured = markets[0]
+    featured = _pick_featured_market(markets, session)
     evidence = build_market_evidence(featured, when)
     write_event_snapshot(
         vault_root,
@@ -162,6 +175,10 @@ async def run_paper_research_pass(
     if action not in PAPER_ACTIONS:
         action = "WAIT"
 
+    tag_list, label_list = compute_paper_tags_and_labels(
+        action, provider, reason, has_evidence=bool(evidence_ids)
+    )
+
     decision_path = write_decision_note(
         vault_root,
         decision_id,
@@ -178,6 +195,8 @@ async def run_paper_research_pass(
             "mode": "paper",
             "status": "recorded",
             "expires_at": _utc_iso(when),
+            "tags": tag_list,
+            "labels": label_list,
         },
         [
             f"# Paper decision: {action}",
@@ -226,6 +245,7 @@ async def run_paper_research_pass(
         vault_decision_path=rel_path,
         created_at=utcnow(),
     )
+    _attach_tags(row, action, provider, reason, has_evidence=bool(evidence_ids))
     session.add(row)
     session.flush()
     return row
@@ -275,6 +295,7 @@ def _persist_wait(
         vault_decision_path=str(vault_root / "decisions" / f"{decision_id}.md"),
         created_at=utcnow(),
     )
+    _attach_tags(row, "WAIT", provider, reason, has_evidence=bool(evidence_ids))
     session.add(row)
     session.flush()
     return row

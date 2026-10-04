@@ -9,6 +9,9 @@
     body { margin: 0; padding: 1rem; max-width: 32rem; margin-inline: auto; }
     .badge { display: inline-block; background: #1a4d3a; color: #b8f0d8; padding: 0.25rem 0.6rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
     .locked { background: #3a1a1a; color: #f0b8b8; margin-left: 0.5rem; }
+    .tag { display: inline-block; background: #243044; color: #c5d4e8; padding: 0.15rem 0.45rem; border-radius: 6px; font-size: 0.7rem; margin: 0.15rem 0.15rem 0 0; }
+    .label { display: inline-block; background: #2a3544; color: #b8c5d6; padding: 0.2rem 0.5rem; border-radius: 8px; font-size: 0.72rem; margin: 0.2rem 0.2rem 0 0; }
+    .alert-banner { background: #3d2a10; border: 1px solid #a67c2e; color: #ffe6b3; padding: 0.65rem 0.75rem; border-radius: 10px; margin: 0.75rem 0; font-size: 0.88rem; line-height: 1.4; }
     h1 { font-size: 1.25rem; margin: 0.75rem 0 0.25rem; }
     .muted { color: #8b98a8; font-size: 0.85rem; line-height: 1.4; }
     .card { background: #151c24; border: 1px solid #2a3544; border-radius: 12px; padding: 1rem; margin: 1rem 0; }
@@ -21,18 +24,35 @@
     table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
     th, td { text-align: left; padding: 0.4rem 0.2rem; border-bottom: 1px solid #2a3544; vertical-align: top; }
     .outcome { color: #8b98a8; font-style: italic; }
+    .row-alert td:first-child { box-shadow: inset 3px 0 0 #c9a227; }
   </style>
 </head>
 <body>
   <span class="badge">PAPER ONLY</span>
   <span class="badge locked">LIVE LOCKED</span>
-  <h1>Model research</h1>
-  <p class="muted">Nothing here places a real bet. Calls are saved for you to score later.</p>
+  <h1>Paper loop</h1>
+  <p class="muted">Each refresh pulls Polymarket data, writes a vault note, and stores a paper call to score later. Pass {{ loop_pass_count }} saved.</p>
+
+  {% if show_alert and latest %}
+  <div class="alert-banner" role="status">
+    <strong>Paper alert:</strong> Latest call is {{ latest.call }} on {{ latest.market_title }}. Still no live order. Review and score the outcome when ready.
+  </div>
+  {% endif %}
 
   <div class="card">
     <div class="muted">Current paper call · provider: {{ provider_label }}</div>
     {% if latest %}
     <div class="call">{{ latest.call }} · {{ latest.market_title }}</div>
+    {% if latest_labels %}
+    <div style="margin:0.35rem 0">
+      {% for lb in latest_labels %}<span class="label">{{ lb }}</span>{% endfor %}
+    </div>
+    {% endif %}
+    {% if latest_tags %}
+    <div>
+      {% for tg in latest_tags %}<span class="tag">{{ tg }}</span>{% endfor %}
+    </div>
+    {% endif %}
     <div class="reason">{{ latest.reason }}</div>
     {% if evidence_items or evidence_ids %}
     <div class="muted" style="margin-top:0.75rem">Evidence (computed in code)</div>
@@ -53,9 +73,9 @@
     <div class="muted" style="margin-top:0.5rem">{{ latest.created_at }} UTC</div>
     <div class="muted">Outcome (fill later): <span class="outcome">{{ latest.outcome or 'pending' }}</span></div>
     {% else %}
-    <p class="muted">No paper call yet. Tap refresh to ask the research model.</p>
+    <p class="muted">No paper call yet. Tap refresh to run the loop.</p>
     {% endif %}
-    <button type="button" id="refreshBtn">Refresh paper call</button>
+    <button type="button" id="refreshBtn">Run paper loop</button>
     <p id="status" class="muted"></p>
   </div>
 
@@ -70,13 +90,14 @@
 
   <h2 style="font-size:1rem">Past paper calls</h2>
   <table>
-    <thead><tr><th>Time</th><th>Call</th><th>Reason</th><th>Outcome</th></tr></thead>
+    <thead><tr><th>Time</th><th>Call</th><th>Tags</th><th>Outcome</th></tr></thead>
     <tbody>
-      {% for h in history %}
-      <tr>
+      {% for entry in history_rows %}
+      {% set h = entry.row %}
+      <tr class="{% if entry.alert %}row-alert{% endif %}">
         <td>{{ h.created_at.strftime('%m-%d %H:%M') if h.created_at else '' }}</td>
-        <td>{{ h.call }}</td>
-        <td>{{ h.reason[:80] }}{% if h.reason|length > 80 %}…{% endif %}</td>
+        <td>{{ h.call }}<br><span class="muted">{{ h.market_title[:40] }}{% if h.market_title|length > 40 %}…{% endif %}</span></td>
+        <td>{% for tg in entry.tags %}<span class="tag">{{ tg }}</span>{% endfor %}</td>
         <td class="outcome">{{ h.outcome or 'pending' }}</td>
       </tr>
       {% else %}
@@ -90,7 +111,7 @@
       const btn = document.getElementById('refreshBtn');
       const status = document.getElementById('status');
       btn.disabled = true;
-      status.textContent = 'Asking research model (paper only)...';
+      status.textContent = 'Running paper loop (markets, vault note, stored call)...';
       try {
         const r = await fetch('{{ refresh_path }}', { method: 'POST', credentials: 'same-origin' });
         if (!r.ok) throw new Error(await r.text());

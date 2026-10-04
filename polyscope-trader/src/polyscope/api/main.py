@@ -44,6 +44,7 @@ from polyscope.db.session import get_system_state, init_db
 from polyscope.logging_utils import configure_logging
 from polyscope.platform.public_client import PlatformClient
 from polyscope.research.ai.paper_signal import fetch_open_markets, generate_paper_model_call
+from polyscope.research.paper_labels import call_is_alert, parse_tags_payload, paper_call_to_api
 
 logger = logging.getLogger(__name__)
 security = HTTPBasic()
@@ -136,6 +137,9 @@ async def build_viktor_page(
             markets = []
     evidence_items: list[dict] = []
     evidence_ids: list[str] = []
+    latest_tags: list[str] = []
+    latest_labels: list[str] = []
+    show_alert = False
     if latest and latest.evidence_json:
         try:
             payload = json.loads(latest.evidence_json)
@@ -143,6 +147,21 @@ async def build_viktor_page(
             evidence_items = list(payload.get("items") or [])
         except json.JSONDecodeError:
             pass
+    if latest:
+        latest_tags, latest_labels = parse_tags_payload(latest.tags_json)
+        show_alert = call_is_alert(latest.call)
+    loop_pass_count = db.scalar(select(func.count()).select_from(PaperModelCall)) or 0
+    history_rows: list[dict] = []
+    for h in history:
+        t, lb = parse_tags_payload(h.tags_json)
+        history_rows.append(
+            {
+                "row": h,
+                "tags": t,
+                "labels": lb,
+                "alert": call_is_alert(h.call),
+            }
+        )
     return templates.TemplateResponse(
         request,
         "viktor.html",
@@ -152,12 +171,16 @@ async def build_viktor_page(
             "trading_mode": cfg.trading_mode.value,
             "provider_label": latest.provider if latest else "none",
             "latest": latest,
-            "history": history,
+            "history_rows": history_rows,
             "markets": markets,
             "refresh_path": refresh_path,
             "evidence_items": evidence_items,
             "evidence_ids": evidence_ids,
             "vault_decision_path": latest.vault_decision_path if latest else None,
+            "latest_tags": latest_tags,
+            "latest_labels": latest_labels,
+            "show_alert": show_alert,
+            "loop_pass_count": loop_pass_count,
         },
     )
 
@@ -168,15 +191,7 @@ async def run_viktor_refresh(db: Session, cfg: Settings) -> dict:
     async with PlatformClient() as platform:
         row = await generate_paper_model_call(db, cfg, platform)
     db.commit()
-    return {
-        "paper": True,
-        "id": row.id,
-        "market": row.market_slug,
-        "call": row.call,
-        "reason": row.reason,
-        "provider": row.provider,
-        "outcome": row.outcome,
-    }
+    return paper_call_to_api(row)
 
 
 def create_app() -> FastAPI:

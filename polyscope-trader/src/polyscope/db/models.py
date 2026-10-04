@@ -278,4 +278,5 @@ class PaperModelCall(Base):
     decision_id: Mapped[str | None] = mapped_column(String(64))
     evidence_json: Mapped[str | None] = mapped_column(Text)
     vault_decision_path: Mapped[str | None] = mapped_column(String(512))
+    tags_json: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

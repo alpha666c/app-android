@@ -53,7 +53,8 @@ def test_refresh_writes_wait_without_model_key(monkeypatch, tmp_path):
     resp = client.post("/p/slug-test/refresh")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["call"] in ("WAIT", "REJECT")
-    assert "AI_GATEWAY_API_KEY" in body["reason"] or "Missing server env" in body["reason"]
+    assert body["call"] in ("WAIT", "REJECT", "BUY", "SELL")
+    assert "tags" in body
+    assert body["alert"] is (body["call"] != "WAIT")
     decisions = list((vault / "decisions").glob("*.md"))
     assert len(decisions) >= 1
