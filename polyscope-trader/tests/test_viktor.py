@@ -95,7 +95,13 @@ def test_viktor_public_slug_no_password(monkeypatch, tmp_path):
     resp = client.get("/p/viktor-test-slug-93e7")
     assert resp.status_code == 200
     assert "PAPER ONLY" in resp.text
+    assert "/p/viktor-test-slug-93e7/api/state" in resp.text
     assert "/p/viktor-test-slug-93e7/refresh" in resp.text
+    state = client.get("/p/viktor-test-slug-93e7/api/state")
+    assert state.status_code == 200
+    body = state.json()
+    assert body["paper_only"] is True
+    assert "decisions" in body
     bad = client.get("/p/wrong-slug")
     assert bad.status_code == 404
     refresh = client.post("/p/viktor-test-slug-93e7/refresh")

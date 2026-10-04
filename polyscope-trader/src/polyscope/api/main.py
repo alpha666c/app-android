@@ -44,7 +44,7 @@ from polyscope.db.session import get_system_state, init_db
 from polyscope.logging_utils import configure_logging
 from polyscope.platform.public_client import PlatformClient
 from polyscope.research.ai.paper_signal import fetch_open_markets, generate_paper_model_call
-from polyscope.research.paper_labels import call_is_alert, parse_tags_payload, paper_call_to_api
+from polyscope.research.paper_labels import paper_call_to_api
 
 logger = logging.getLogger(__name__)
 security = HTTPBasic()
@@ -115,72 +115,48 @@ def assert_viktor_public_slug(slug: str, cfg: Settings) -> None:
         raise HTTPException(status_code=404, detail="Not found")
 
 
+async def viktor_paper_state(db: Session, cfg: Settings) -> dict:
+    """JSON state for the Viktor paper app (database-backed)."""
+    assert_paper_only_for_research(cfg)
+    rows = db.scalars(select(PaperModelCall).order_by(PaperModelCall.id.desc()).limit(30)).all()
+    loop_pass_count = db.scalar(select(func.count()).select_from(PaperModelCall)) or 0
+    markets: list[dict] = []
+    async with PlatformClient() as platform:
+        try:
+            raw = await fetch_open_markets(platform, limit=6)
+            markets = [{"title": m.get("title"), "slug": m.get("slug")} for m in raw]
+        except Exception:
+            markets = []
+    decisions = [paper_call_to_api(r) for r in rows]
+    latest = decisions[0] if decisions else None
+    return {
+        "paper_only": True,
+        "live_locked": True,
+        "trading_mode": cfg.trading_mode.value,
+        "loop_pass_count": loop_pass_count,
+        "latest": latest,
+        "decisions": decisions,
+        "markets": markets,
+    }
+
+
 async def build_viktor_page(
     request: Request,
     db: Session,
     cfg: Settings,
-    refresh_path: str,
+    api_state_path: str,
+    api_refresh_path: str,
 ) -> HTMLResponse:
     try:
         assert_paper_only_for_research(cfg)
     except ValueError as exc:
         raise HTTPException(503, str(exc)) from exc
-    latest = db.scalar(select(PaperModelCall).order_by(PaperModelCall.id.desc()).limit(1))
-    history = db.scalars(
-        select(PaperModelCall).order_by(PaperModelCall.id.desc()).limit(30)
-    ).all()
-    markets: list[dict] = []
-    async with PlatformClient() as platform:
-        try:
-            markets = await fetch_open_markets(platform, limit=6)
-        except Exception:
-            markets = []
-    evidence_items: list[dict] = []
-    evidence_ids: list[str] = []
-    latest_tags: list[str] = []
-    latest_labels: list[str] = []
-    show_alert = False
-    if latest and latest.evidence_json:
-        try:
-            payload = json.loads(latest.evidence_json)
-            evidence_ids = list(payload.get("evidence_ids") or [])
-            evidence_items = list(payload.get("items") or [])
-        except json.JSONDecodeError:
-            pass
-    if latest:
-        latest_tags, latest_labels = parse_tags_payload(latest.tags_json)
-        show_alert = call_is_alert(latest.call)
-    loop_pass_count = db.scalar(select(func.count()).select_from(PaperModelCall)) or 0
-    history_rows: list[dict] = []
-    for h in history:
-        t, lb = parse_tags_payload(h.tags_json)
-        history_rows.append(
-            {
-                "row": h,
-                "tags": t,
-                "labels": lb,
-                "alert": call_is_alert(h.call),
-            }
-        )
     return templates.TemplateResponse(
         request,
         "viktor.html",
         {
-            "paper_only": True,
-            "live_locked": True,
-            "trading_mode": cfg.trading_mode.value,
-            "provider_label": latest.provider if latest else "none",
-            "latest": latest,
-            "history_rows": history_rows,
-            "markets": markets,
-            "refresh_path": refresh_path,
-            "evidence_items": evidence_items,
-            "evidence_ids": evidence_ids,
-            "vault_decision_path": latest.vault_decision_path if latest else None,
-            "latest_tags": latest_tags,
-            "latest_labels": latest_labels,
-            "show_alert": show_alert,
-            "loop_pass_count": loop_pass_count,
+            "api_state_path": api_state_path,
+            "api_refresh_path": api_refresh_path,
         },
     )
 
@@ -211,7 +187,17 @@ def create_app() -> FastAPI:
         cfg: Annotated[Settings, Depends(get_settings)],
         _: Annotated[bool, Depends(verify_viktor_access)],
     ) -> HTMLResponse:
-        return await build_viktor_page(request, db, cfg, "/viktor/refresh")
+        return await build_viktor_page(
+            request, db, cfg, "/viktor/api/state", "/viktor/refresh"
+        )
+
+    @app.get("/viktor/api/state")
+    async def viktor_api_state(
+        db: Annotated[Session, Depends(get_db)],
+        cfg: Annotated[Settings, Depends(get_settings)],
+        _: Annotated[bool, Depends(verify_viktor_access)],
+    ) -> dict:
+        return await viktor_paper_state(db, cfg)
 
     @app.post("/viktor/refresh")
     async def viktor_refresh(
@@ -229,7 +215,18 @@ def create_app() -> FastAPI:
         cfg: Annotated[Settings, Depends(get_settings)],
     ) -> HTMLResponse:
         assert_viktor_public_slug(slug, cfg)
-        return await build_viktor_page(request, db, cfg, f"/p/{slug}/refresh")
+        return await build_viktor_page(
+            request, db, cfg, f"/p/{slug}/api/state", f"/p/{slug}/refresh"
+        )
+
+    @app.get("/p/{slug}/api/state")
+    async def viktor_public_api_state(
+        slug: str,
+        db: Annotated[Session, Depends(get_db)],
+        cfg: Annotated[Settings, Depends(get_settings)],
+    ) -> dict:
+        assert_viktor_public_slug(slug, cfg)
+        return await viktor_paper_state(db, cfg)
 
     @app.post("/p/{slug}/refresh")
     async def viktor_public_refresh(

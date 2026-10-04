@@ -25,102 +25,155 @@
     th, td { text-align: left; padding: 0.4rem 0.2rem; border-bottom: 1px solid #2a3544; vertical-align: top; }
     .outcome { color: #8b98a8; font-style: italic; }
     .row-alert td:first-child { box-shadow: inset 3px 0 0 #c9a227; }
+    .server-id { color: #6b9bd1; font-size: 0.75rem; }
   </style>
 </head>
 <body>
   <span class="badge">PAPER ONLY</span>
   <span class="badge locked">LIVE LOCKED</span>
-  <h1>Paper loop</h1>
-  <p class="muted">Each refresh pulls Polymarket data, writes a vault note, and stores a paper call to score later. Pass {{ loop_pass_count }} saved.</p>
-
-  {% if show_alert and latest %}
-  <div class="alert-banner" role="status">
-    <strong>Paper alert:</strong> Latest call is {{ latest.call }} on {{ latest.market_title }}. Still no live order. Review and score the outcome when ready.
+  <div id="app">
+    <p class="muted" id="bootStatus">Loading from server...</p>
   </div>
-  {% endif %}
-
-  <div class="card">
-    <div class="muted">Current paper call · provider: {{ provider_label }}</div>
-    {% if latest %}
-    <div class="call">{{ latest.call }} · {{ latest.market_title }}</div>
-    {% if latest_labels %}
-    <div style="margin:0.35rem 0">
-      {% for lb in latest_labels %}<span class="label">{{ lb }}</span>{% endfor %}
-    </div>
-    {% endif %}
-    {% if latest_tags %}
-    <div>
-      {% for tg in latest_tags %}<span class="tag">{{ tg }}</span>{% endfor %}
-    </div>
-    {% endif %}
-    <div class="reason">{{ latest.reason }}</div>
-    {% if evidence_items or evidence_ids %}
-    <div class="muted" style="margin-top:0.75rem">Evidence (computed in code)</div>
-    <ul class="markets">
-      {% for e in evidence_items %}
-      <li>{{ e.title or e.market_slug }} · YES buy {{ e.yes_buy_price or 'n/a' }} · {{ e.id }}</li>
-      {% endfor %}
-      {% if not evidence_items %}
-      {% for eid in evidence_ids %}
-      <li>{{ eid }}</li>
-      {% endfor %}
-      {% endif %}
-    </ul>
-    {% if vault_decision_path %}
-    <div class="muted">Vault note: {{ vault_decision_path }}</div>
-    {% endif %}
-    {% endif %}
-    <div class="muted" style="margin-top:0.5rem">{{ latest.created_at }} UTC</div>
-    <div class="muted">Outcome (fill later): <span class="outcome">{{ latest.outcome or 'pending' }}</span></div>
-    {% else %}
-    <p class="muted">No paper call yet. Tap refresh to run the loop.</p>
-    {% endif %}
-    <button type="button" id="refreshBtn">Run paper loop</button>
-    <p id="status" class="muted"></p>
-  </div>
-
-  <h2 style="font-size:1rem">Open markets</h2>
-  <ul class="markets">
-    {% for m in markets %}
-    <li>{{ m.title }}</li>
-    {% else %}
-    <li class="muted">Markets unavailable right now.</li>
-    {% endfor %}
-  </ul>
-
-  <h2 style="font-size:1rem">Past paper calls</h2>
-  <table>
-    <thead><tr><th>Time</th><th>Call</th><th>Tags</th><th>Outcome</th></tr></thead>
-    <tbody>
-      {% for entry in history_rows %}
-      {% set h = entry.row %}
-      <tr class="{% if entry.alert %}row-alert{% endif %}">
-        <td>{{ h.created_at.strftime('%m-%d %H:%M') if h.created_at else '' }}</td>
-        <td>{{ h.call }}<br><span class="muted">{{ h.market_title[:40] }}{% if h.market_title|length > 40 %}…{% endif %}</span></td>
-        <td>{% for tg in entry.tags %}<span class="tag">{{ tg }}</span>{% endfor %}</td>
-        <td class="outcome">{{ h.outcome or 'pending' }}</td>
-      </tr>
-      {% else %}
-      <tr><td colspan="4" class="muted">No history yet.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
 
   <script>
-    document.getElementById('refreshBtn').addEventListener('click', async () => {
+    const STATE_URL = {{ api_state_path | tojson }};
+    const REFRESH_URL = {{ api_refresh_path | tojson }};
+
+    function esc(s) {
+      if (s == null) return '';
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function fmtTime(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return iso;
+      const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const dd = String(d.getUTCDate()).padStart(2, '0');
+      const hh = String(d.getUTCHours()).padStart(2, '0');
+      const mi = String(d.getUTCMinutes()).padStart(2, '0');
+      return `${mm}-${dd} ${hh}:${mi}`;
+    }
+
+    function renderTags(tags) {
+      return (tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join('');
+    }
+
+    function renderLabels(labels) {
+      return (labels || []).map(l => `<span class="label">${esc(l)}</span>`).join('');
+    }
+
+    function renderEvidence(latest) {
+      const ev = latest && latest.evidence;
+      if (!ev) return '';
+      const items = ev.items || [];
+      const ids = ev.evidence_ids || [];
+      let rows = items.map(e =>
+        `<li>${esc(e.title || e.market_slug)} · YES buy ${esc(e.yes_buy_price || 'n/a')} · ${esc(e.id)}</li>`
+      ).join('');
+      if (!rows && ids.length) {
+        rows = ids.map(id => `<li>${esc(id)}</li>`).join('');
+      }
+      if (!rows) return '';
+      const vault = latest.vault_decision_path
+        ? `<div class="muted">Vault note: ${esc(latest.vault_decision_path)}</div>` : '';
+      return `
+        <div class="muted" style="margin-top:0.75rem">Evidence (computed in code)</div>
+        <ul class="markets">${rows}</ul>${vault}`;
+    }
+
+    function renderState(state) {
+      const latest = state.latest;
+      const alert = latest && latest.alert;
+      const alertHtml = alert
+        ? `<div class="alert-banner" role="status"><strong>Paper alert:</strong> Latest call is ${esc(latest.call)} on ${esc(latest.market_title)}. Still no live order.</div>`
+        : '';
+
+      let currentHtml;
+      if (latest) {
+        currentHtml = `
+          <div class="call">${esc(latest.call)} · ${esc(latest.market_title)}</div>
+          <div class="server-id">Stored row #${esc(latest.id)} from database</div>
+          <div style="margin:0.35rem 0">${renderLabels(latest.labels)}</div>
+          <div>${renderTags(latest.tags)}</div>
+          <div class="reason">${esc(latest.reason)}</div>
+          ${renderEvidence(latest)}
+          <div class="muted" style="margin-top:0.5rem">${esc(latest.created_at)}</div>
+          <div class="muted">Outcome (fill later): <span class="outcome">${esc(latest.outcome || 'pending')}</span></div>`;
+      } else {
+        currentHtml = '<p class="muted">No paper call yet. Tap the button to run the loop.</p>';
+      }
+
+      const markets = (state.markets || []).map(m => `<li>${esc(m.title)}</li>`).join('')
+        || '<li class="muted">Markets unavailable right now.</li>';
+
+      const history = (state.decisions || []).map(d => {
+        const title = d.market_title || '';
+        const short = title.length > 40 ? title.slice(0, 40) + '…' : title;
+        const rowClass = d.alert ? 'row-alert' : '';
+        return `<tr class="${rowClass}">
+          <td>${esc(fmtTime(d.created_at))}<br><span class="server-id">#${esc(d.id)}</span></td>
+          <td>${esc(d.call)}<br><span class="muted">${esc(short)}</span></td>
+          <td>${renderTags(d.tags)}</td>
+          <td class="outcome">${esc(d.outcome || 'pending')}</td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="4" class="muted">No history yet.</td></tr>';
+
+      document.getElementById('app').innerHTML = `
+        <h1>Paper loop</h1>
+        <p class="muted">Backend-driven. ${esc(state.loop_pass_count)} decision(s) in SQLite. Open markets loaded live.</p>
+        ${alertHtml}
+        <div class="card">
+          <div class="muted">Current paper call · provider: ${esc(latest ? latest.provider : 'none')}</div>
+          ${currentHtml}
+          <button type="button" id="refreshBtn">Run paper loop</button>
+          <p id="status" class="muted"></p>
+        </div>
+        <h2 style="font-size:1rem">Open markets</h2>
+        <ul class="markets">${markets}</ul>
+        <h2 style="font-size:1rem">Stored decisions</h2>
+        <table>
+          <thead><tr><th>Time</th><th>Call</th><th>Tags</th><th>Outcome</th></tr></thead>
+          <tbody>${history}</tbody>
+        </table>`;
+
+      document.getElementById('refreshBtn').addEventListener('click', runLoop);
+    }
+
+    async function loadState() {
+      const boot = document.getElementById('bootStatus');
+      const r = await fetch(STATE_URL, { credentials: 'same-origin' });
+      if (!r.ok) throw new Error(await r.text());
+      const state = await r.json();
+      renderState(state);
+      if (boot) boot.remove();
+      return state;
+    }
+
+    async function runLoop() {
       const btn = document.getElementById('refreshBtn');
       const status = document.getElementById('status');
       btn.disabled = true;
-      status.textContent = 'Running paper loop (markets, vault note, stored call)...';
+      status.textContent = 'POST refresh: fetching Polymarket, writing vault, storing row...';
       try {
-        const r = await fetch('{{ refresh_path }}', { method: 'POST', credentials: 'same-origin' });
+        const r = await fetch(REFRESH_URL, { method: 'POST', credentials: 'same-origin' });
         if (!r.ok) throw new Error(await r.text());
-        status.textContent = 'Saved. Reloading...';
-        location.reload();
+        const stored = await r.json();
+        const state = await loadState();
+        status.textContent = `Saved server row #${stored.id}. UI updated from GET ${STATE_URL}.`;
+        btn.disabled = false;
       } catch (e) {
-        status.textContent = 'Refresh failed. Try again in a moment.';
+        status.textContent = 'Request failed. Try again.';
         btn.disabled = false;
       }
+    }
+
+    loadState().catch(() => {
+      document.getElementById('app').innerHTML = '<p class="muted">Could not load state from server.</p>';
     });
   </script>
 </body>

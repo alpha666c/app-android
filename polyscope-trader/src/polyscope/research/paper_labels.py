@@ -93,5 +93,7 @@ def paper_call_to_api(row: Any) -> dict[str, Any]:
         "labels": labels,
         "alert": call_is_alert(action),
         "decision_id": row.decision_id,
+        "vault_decision_path": row.vault_decision_path,
+        "hypothesis_id": row.hypothesis_id,
         "evidence": json.loads(row.evidence_json) if row.evidence_json else None,
     }
